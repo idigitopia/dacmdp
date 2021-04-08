@@ -1,6 +1,11 @@
 *__pycache__*
 *.idea*
 results
+*.pytest_cache
+*.egg-info
+*.egg
+*.pyc
+*.coveragei
 wandb
 scraps
 media
