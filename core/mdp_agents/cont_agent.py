@@ -262,9 +262,6 @@ class DeterministicAgent(object):
         if self.build_args.rebuild_mdpfcache:
             self.v_print("Rebuilding MDP: loading Cached solution Vectors from",self.build_args.save_folder)
             self.load_sol_vectors(self.build_args.save_folder)
-#         elif self.build_args.use_cached_nn:
-#             self.v_print("Using Cached Nearest Neighbors: loading Cached NN Vectors from",self.build_args.save_folder)
-#             self.load_nn_vectors(self.build_args.save_folder)
         else:
             self.intialize_dac_dynamics()
             self.initialize_MDP()
@@ -275,27 +272,16 @@ class DeterministicAgent(object):
             self.cache_sol_vectors(self.build_args.save_folder)
             
     #### Value Functions #####
-    def get_q_value(self, obs, k=1, batch_pass= False):
-        pass
-#         if batch_pass:
-#             knnD_batch = self.s_kdTree.get_knn_batch(obs, k)
-#             return [self.mdp_T.vD_cpu[self.mdp_T.s2i[s]] for s in [list(knnD_batch)[0] for knnD in knnD_batch]
-#         else:
-#             knnD = self.s_kdTree.get_knn(obs, k)
-#             s = list(knnD)[0]
-#             return self.mdp_T.vD_cpu[self.mdp_T.s2i[s]]
-            
-        
-#         knn_hs = self.s_kdTree.get_knn(hs, k=plcy_k)
-#         knn_hs_norm = kernel_probs(knn_hs, delta=self.build_args.knn_delta) \
-#             if weight_nn else {k: 1 / len(knn_hs) for k in knn_hs}
+    def get_values_batch(self, s_batch, k=1):
+        knnD_batch = self.s_kdTree.get_knn_batch(s_batch, k = k)
+        knn_values = []
+        for i, knnD in enumerate(knnD_batch):
+            nn_idxs = [self.mdp_T.s2i[s] for s in knnD]
+            knn_values.append(np.mean(self.mdp_T.vD_cpu[nn_idxs]))
 
-#         for a in self.mdp_T.A:
-#             qval_dict[a] = np.sum([, self.mdp_T.a2i[a]] * p for s, p in knn_hs_norm.items()])
-        
+        return knn_values
+
             
-        
-    
     #### Policy Functions ####
     def random_policy(self, obs):
         return self.action_space.sample()
@@ -391,8 +377,25 @@ class DeterministicAgent(object):
                     
         self.v_print("Initalization from cache complete")
         
+        
+
     
     ## Logging Functions
+    @property
+    def mdp_distributions(self):
+        rewards = self.mdp_T.rewardMatrix_cpu[:,:len(self.mdp_T.i2s),0].reshape(-1)
+
+        all_distr = {"Transition Probabilty Distribution": 
+                     self_loop_prob_distribution.mdp_T.tranProbMatrix_cpu[:,:len(self.mdp_T.i2s),0].reshape(-1),
+                     "Reward Distribution": rewards[rewards>self.mdp_T.build_args.ur],
+                     "Value Distribution": self.mdp_T.vD_cpu[:len(self.mdp_T.i2s)],
+                     "Safe Value Distribution": self.mdp_T.s_vD_cpu[:len(self.mdp_T.i2s)],
+                     "Q Value Distribution": None
+                     # "NN distance Distribtuion": [d for d in self.dist_to_nn_cache if d != 0],
+                     # "Self Loop Probability Distribution": mdp_T.self_loop_prob_distribution,
+             }
+        return all_distr 
+    
     def log_all_mdp_metrics(self, mdp_frame_count, wandb_logger=None, tag_parent="MDP stats"):
         mdp_T = self.mdp_T
         all_distr = {"Transition Probabilty Distribution": mdp_T.tran_prob_distribution,
