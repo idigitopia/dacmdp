@@ -6,7 +6,7 @@ from tqdm import tqdm
 from copy import deepcopy as cpy
 import math
 import random
-from lmdp.mdp.MDP_GPU import init2zero, init2list, init2dict, init2zero_def_dict, init2zero_def_def_dict
+# from lmdp.mdp.MDP_GPU import init2zero, init2list, init2dict, init2zero_def_dict, init2zero_def_def_dict
 import time
 import numpy as np
 import heapq
@@ -24,6 +24,25 @@ from os import path
 from typing import Dict, Any
 import hashlib
 import json
+
+def init2dict():
+    return {}
+
+def init2list():
+    return []
+
+
+def init2zero():
+    return 0
+
+
+def init2zero_def_dict():
+    return defaultdict(init2zero)
+
+
+def init2zero_def_def_dict():
+    return defaultdict(init2zero_def_dict)
+
 
 
 # KD Tree helper function
@@ -349,7 +368,7 @@ class DeterministicAgent(object):
         
         self.v_print("Solution vectors cached")
         
-    def load_sol_vectors(self,save_folder, match_hash = True):
+    def load_sol_vectors(self,save_folder):
         
         # These attributes neeed to be initialized by 
         hash_attrs = ["tt2i","i2tt"]
@@ -372,11 +391,8 @@ class DeterministicAgent(object):
         
         ld_hmap,ld_mdp_hmap = pk.load(open(f"{save_folder}_hmaps.pk","rb"))
         
-        if match_hash:
-            assert all([hmap[a]==ld_hmap[a] for a in hash_attrs])
-            assert all([mdp_hmap[a]==ld_mdp_hmap[a] for a in mdp_hash_attrs]) 
-        else:
-            print("Warning Hash map of indexes are not being check, NN might be different")
+        assert all([hmap[a]==ld_hmap[a] for a in hash_attrs])
+        assert all([mdp_hmap[a]==ld_mdp_hmap[a] for a in mdp_hash_attrs])
                     
         self.v_print("Initalization from cache complete")
         
