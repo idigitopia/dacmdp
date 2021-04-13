@@ -253,7 +253,7 @@ class DeterministicAgent(object):
         self.v_print("Step 5 [Solve MDP]:  Complete,  Time Elapsed: {}\n\n".format(time.time() - st))
 
     # Main Function
-    def process(self, train_buffer):
+    def process(self, train_buffer, match_cache = True):
         """End to End processing of traing buffer with observations"""
 
         self.parse_all_transitions(train_buffer)
@@ -261,7 +261,7 @@ class DeterministicAgent(object):
         
         if self.build_args.rebuild_mdpfcache:
             self.v_print("Rebuilding MDP: loading Cached solution Vectors from",self.build_args.save_folder)
-            self.load_sol_vectors(self.build_args.save_folder)
+            self.load_sol_vectors(self.build_args.save_folder, match_cache = match_cache)
         else:
             self.intialize_dac_dynamics()
             self.initialize_MDP()
