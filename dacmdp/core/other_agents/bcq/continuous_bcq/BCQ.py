@@ -49,15 +49,20 @@ class Critic(nn.Module):
         q2 = self.l61(F.relu(self.l6(q2)))
         return q1, q2
 
-
     def q1(self, state, action):
         q1 = F.relu(self.l1(torch.cat([state, action], 1)))
         q1 = F.relu(self.l2(q1))
         q1 = self.l31(F.relu(self.l3(q1)))
         return q1
 
+    def encode(self, state, action):
+        q1 = F.relu(self.l1(torch.cat([state, action], 1)))
+        q1 = F.relu(self.l2(q1))
+        z = self.l3(q1)
+        return z
 
-# Vanilla Variational Auto-Encoder 
+
+# Vanilla Variational Auto-Encoder
 class VAE(nn.Module):
     def __init__(self, state_dim, action_dim, latent_dim, max_action, device):
         super(VAE, self).__init__()
@@ -133,6 +138,9 @@ class BCQ(object):
             ind = q1.argmax(0)
         return action[ind].cpu().data.numpy().flatten()
 
+    def encode(self, state):
+        action = self.select_action(state)
+        return self.critic.encode(state,action)
 
     def train(self, replay_buffer, iterations, batch_size=100):
 
@@ -192,3 +200,19 @@ class BCQ(object):
 
             for param, target_param in zip(self.actor.parameters(), self.actor_target.parameters()):
                 target_param.data.copy_(self.tau * param.data + (1 - self.tau) * target_param.data)
+
+    def save(self, filename):
+        torch.save(self.critic.state_dict(), filename + "_critic")
+        torch.save(self.critic_optimizer.state_dict(), filename + "_critic_optimizer")
+
+        torch.save(self.actor.state_dict(), filename + "_actor")
+        torch.save(self.actor_optimizer.state_dict(), filename + "_actor_optimizer")
+
+    def load(self, filename):
+        self.critic.load_state_dict(torch.load(filename + "_critic"))
+        self.critic_optimizer.load_state_dict(torch.load(filename + "_critic_optimizer"))
+        self.critic_target = copy.deepcopy(self.critic)
+
+        self.actor.load_state_dict(torch.load(filename + "_actor"))
+        self.actor_optimizer.load_state_dict(torch.load(filename + "_actor_optimizer"))
+        self.actor_target = copy.deepcopy(self.actor)

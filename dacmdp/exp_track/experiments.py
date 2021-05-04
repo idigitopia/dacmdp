@@ -13,30 +13,34 @@ for seed in [0,2,4]:
     for dataset in ["Robust", "Random", "Optimal"]:
         for tran_type_count in [1, 5, 10, 20]:
             for penalty_beta in [0,0.1,1,10,100,1000,10000,100000]:
-                env_name = "cartpole-cont-v1"
-                dataset_map= {d:f"{d}_{env_name}_{seed}" for d in ["Robust", "Random", "Optimal"]}
-                cartPoleDetExps.add_experiment(Experiment(id=f"Det-S{seed}-D{dataset}-tt{tran_type_count}-p{penalty_beta}",
-                                       meta="Deterministic MDP Build For Continuous Action Spaces. Story 1.",
-                                       expPrefix="python main_deterministic.py ",
-                                       expSuffix=f"--env_name CartPole-cont-v1 --tran_type_count {tran_type_count} --wandb_project DACMDPCONT-V0 \
-                                        --load_buffer --buffer_size 100000  --buffer_name {dataset_map[dataset]} --data_dir /nfs/hpc/share/shrestaa/projects/dacmdp_cont/buffers/ \
-                                        --MAX_S_COUNT 110000 --MAX_NS_COUNT 1 --mdp_build_k 1 --normalize_by_distance --penalty_beta {penalty_beta} \
-                                        --gamma 0.99 --slip_prob 0.1 --default_mode GPU \
-                                        --eval_episode_count 100 --plcy_k 1"))
-for seed in [0,2,4]:
-    for dataset in ["Robust", "Random", "Optimal"]:
-        for tran_type_count in [1, 5, 10, 20]:
-            for penalty_beta in [0,0.1,1,10,100,1000,10000,100000]:
-                env_name = "cartpole-cont-v1"
-                dataset_map= {d:f"{d}_{env_name}_{seed}" for d in ["Robust", "Random", "Optimal"]}
-                cartPoleDetExps.add_experiment(Experiment(id=f"Stoch-S{seed}-D{dataset}-tt{tran_type_count}-p{penalty_beta}",
-                                       meta="Deterministic MDP Build For Continuous Action Spaces. Story 1.",
-                                       expPrefix="python main_stochastic.py ",
-                                       expSuffix=f"--env_name CartPole-cont-v1 --tran_type_count {tran_type_count} --wandb_project DACMDPCONT-V0 \
-                                        --load_buffer --buffer_size 100000  --buffer_name {dataset_map[dataset]} --data_dir /nfs/hpc/share/shrestaa/projects/dacmdp_cont/buffers/ \
-                                        --MAX_S_COUNT 110000 --MAX_NS_COUNT 1 --mdp_build_k 1 --normalize_by_distance --penalty_beta {penalty_beta} \
-                                        --gamma 0.99 --slip_prob 0.1 --default_mode GPU \
-                                        --eval_episode_count 100 --plcy_k 1"))
+                for MAX_NS_COUNT in [1, 5, 10, 20]:
+                    env_name = "cartpole-cont-v1"
+                    dataset_map= {d:f"{d}_{env_name}_{seed}" for d in ["Robust", "Random", "Optimal"]}
+                    cartPoleDetExps.add_experiment(Experiment(id=f"S{seed}-D{dataset}-tt{tran_type_count}-p{penalty_beta}-ns{MAX_NS_COUNT}",
+                                           meta="Stochastic MDP Build For Continuous Action Spaces. Story 1.",
+                                           expPrefix="python main_deterministic.py ",
+                                           expSuffix=f"--env_name CartPole-cont-v1 --tran_type_count {tran_type_count} --wandb_project DACMDPCONT-V0 \
+                                            --load_buffer --buffer_size 100000  --buffer_name {dataset_map[dataset]} \
+                                            --data_dir /nfs/hpc/share/shrestaa/projects/dacmdp_cont/buffers/ \
+                                            --MAX_S_COUNT 110000 --MAX_NS_COUNT {MAX_NS_COUNT} --mdp_build_k {MAX_NS_COUNT} \
+                                            --normalize_by_distance --penalty_beta {penalty_beta} --ur 0 --knn_delta 1e-5\
+                                            --gamma 0.99 --slip_prob 0.1 --save_mdp2cache \
+                                            --save_folder /nfs/hpc/share/shrestaa/projects/dacmdp_cont/results \
+                                            --eval_episode_count 100 --plcy_k 1"))
+# for seed in [0,2,4]:
+#     for dataset in ["Robust", "Random", "Optimal"]:
+#         for tran_type_count in [1, 5, 10, 20]:
+#             for penalty_beta in [0,0.1,1,10,100,1000,10000,100000]:
+#                 env_name = "cartpole-cont-v1"
+#                 dataset_map= {d:f"{d}_{env_name}_{seed}" for d in ["Robust", "Random", "Optimal"]}
+#                 cartPoleDetExps.add_experiment(Experiment(id=f"Stoch-S{seed}-D{dataset}-tt{tran_type_count}-p{penalty_beta}",
+#                                        meta="Deterministic MDP Build For Continuous Action Spaces. Story 1.",
+#                                        expPrefix="python main_stochastic.py ",
+#                                        expSuffix=f"--env_name CartPole-cont-v1 --tran_type_count {tran_type_count} --wandb_project DACMDPCONT-V0 \
+#                                         --load_buffer --buffer_size 100000  --buffer_name {dataset_map[dataset]} --data_dir /nfs/hpc/share/shrestaa/projects/dacmdp_cont/buffers/ \
+#                                         --MAX_S_COUNT 110000 --MAX_NS_COUNT 1 --mdp_build_k 1 --normalize_by_distance --penalty_beta {penalty_beta} \
+#                                         --gamma 0.99 --slip_prob 0.1 --default_mode GPU \
+#                                         --eval_episode_count 100 --plcy_k 1"))
 ############################################################################################################################################################################
                                                           
 
@@ -58,7 +62,7 @@ for env_name in d4rlGym_envs + d4rlMaze_envs + d4rlAntmaze_envs + d4rlAirdroit_e
                                            expPrefix="python main_deterministic.py ",
                                            expSuffix=f"--env_name {env_name} --tran_type_count {tran_type_count} --wandb_project DACMDPCONT-V0 \
                                             --load_buffer --buffer_size 1000000 \
-                                            --MAX_S_COUNT 1100000 --MAX_NS_COUNT 1 --mdp_build_k 1 --normalize_by_distance --penalty_beta {penalty_beta} \
+                                            --MAX_S_COUNT 1100000 --MAX_NS_COUNT 1 --mdp_build_k 1 --normalize_by_distance --penalty_beta {penalty_beta} --ur 0 \
                                             --gamma 0.99 --slip_prob 0.1 --default_mode GPU --save_mdp2cache\
                                             --eval_episode_count 100 --plcy_k 1"))
             
