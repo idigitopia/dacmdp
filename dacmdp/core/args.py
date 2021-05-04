@@ -21,7 +21,8 @@ class BaseConfig(object):
     def seed_additional_arguments(self):
         self.logArgs.wandb_id = self.pad_datetime(self.logArgs.exp_id) \
                                 if self.logArgs.wandb_id == "default" else self.logArgs.wandb_id
-        self.logArgs.results_folder = path.join("results",self.envArgs.env_name,self.logArgs.wandb_id) \
+        root_dir = os.getenv('DACMDP_ROOT_DIR', default='results')
+        self.logArgs.results_folder = path.join(root_dir,self.envArgs.env_name,self.logArgs.wandb_id) \
                                         if self.logArgs.results_folder == "default" else self.logArgs.results_folder
         self.mdpBuildArgs.save_folder = os.path.join(save_path,f"mdp_results/D-{dynamics_id}P-{pretrained_label}/DET-TT{tran_type_count}-K{mdp_build_k}-P{penalty_beta}/Dev{mdp_config.dataArgs.buffer_device}/" ) \
                                         if self.mdpBuildArgs.save_folder == "default" else self.mdpBuildArgs.save_folder
