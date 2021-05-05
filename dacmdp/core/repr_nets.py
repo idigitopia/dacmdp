@@ -10,6 +10,7 @@ class DummyNet():
     
 
     def encode_state_batch(self, o_batch):
+        o_batch = o_batch.cpu().numpy() if torch.is_tensor(o_batch) else o_batch
         return [tuple(np.array(o).astype(np.float32)) for o in o_batch]
     
     def encode_action_batch(self,a_batch):
@@ -63,7 +64,7 @@ class LatentPolicyNet(DummyNet):
         s_batch = s_batch.to(self.device) if torch.is_tensor(s_batch) else torch.FloatTensor(s_batch).to(self.device)
         a_batch = a_batch.to(self.device) if torch.is_tensor(a_batch) else torch.FloatTensor(a_batch).to(self.device)
         ns_batch = self.dynamics_model.transition.rnn(a_batch, s_batch).detach().cpu().numpy().astype(np.float32)
-        return [tuple(s) for s in s_batch]
+        return [tuple(s) for s in ns_batch]
         
 class BCQEncoderNet():
     def __init__(self, bcq_net, device):

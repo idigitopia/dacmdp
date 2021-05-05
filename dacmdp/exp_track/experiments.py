@@ -11,9 +11,9 @@ cartPoleDetExps =  ExperimentPool()
 
 for seed in [0,2,4]:
     for dataset in ["Robust", "Random", "Optimal"]:
-        for tran_type_count in [1, 5, 10, 20]:
+        for tran_type_count in [1, 5, 10, 20, 40]:
             for penalty_beta in [0,0.1,1,10,100,1000,10000,100000]:
-                for MAX_NS_COUNT in [1, 5, 10, 20]:
+                for MAX_NS_COUNT in [1, 5, 10, 20, 40]:
                     env_name = "cartpole-cont-v1"
                     dataset_map= {d:f"{d}_{env_name}_{seed}" for d in ["Robust", "Random", "Optimal"]}
                     cartPoleDetExps.add_experiment(Experiment(id=f"S{seed}-D{dataset}-tt{tran_type_count}-p{penalty_beta}-ns{MAX_NS_COUNT}",
@@ -55,14 +55,15 @@ d4rlAntmaze_envs = ["antmaze-umaze-v0","antmaze-umaze-diverse-v0","antmaze-mediu
 d4rlAirdroit_envs = ["pen-human-v0","pen-cloned-v0","pen-expert-v0","hammer-human-v0","hammer-cloned-v0","hammer-expert-v0","door-human-v0","door-cloned-v0","door-expert-v0","relocate-human-v0","relocate-cloned-v0","relocate-expert-v0"]
 
 for env_name in d4rlGym_envs + d4rlMaze_envs + d4rlAntmaze_envs + d4rlAirdroit_envs:
-    for tran_type_count in [1, 5, 10, 20]:
+    for tran_type_count in [1, 5, 10, 20, 40]:
         for penalty_beta in [0,0.1,1,10,100,1000,10000,100000]:
-            d4rlGymDetExps.add_experiment(Experiment(id=f"Det-{env_name}-tt{tran_type_count}-p{penalty_beta}",
-                                           meta="Deterministic MDP Build For Continuous Action Spaces. Story 1.",
+            for MAX_NS_COUNT in [1, 5, 10, 20, 40]:
+            d4rlGymDetExps.add_experiment(Experiment(id=f"Stch-{env_name}-tt{tran_type_count}-p{penalty_beta}-ns{MAX_NS_COUNT}",
+                                           meta="Stochastic MDP Build For Continuous Action Spaces. Story 1.",
                                            expPrefix="python main_deterministic.py ",
                                            expSuffix=f"--env_name {env_name} --tran_type_count {tran_type_count} --wandb_project DACMDPCONT-V0 \
                                             --load_buffer --buffer_size 1000000 \
-                                            --MAX_S_COUNT 1100000 --MAX_NS_COUNT 1 --mdp_build_k 1 --normalize_by_distance --penalty_beta {penalty_beta} --ur 0 \
+                                            --MAX_S_COUNT 1100000 --MAX_NS_COUNT {MAX_NS_COUNT} --mdp_build_k {MAX_NS_COUNT} --normalize_by_distance --penalty_beta {penalty_beta} --ur 0 \
                                             --gamma 0.99 --slip_prob 0.1 --default_mode GPU --save_mdp2cache\
                                             --eval_episode_count 100 --plcy_k 1"))
             
