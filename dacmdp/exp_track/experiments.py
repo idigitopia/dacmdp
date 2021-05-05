@@ -18,7 +18,7 @@ for seed in [0,2,4]:
                     dataset_map= {d:f"{d}_{env_name}_{seed}" for d in ["Robust", "Random", "Optimal"]}
                     cartPoleDetExps.add_experiment(Experiment(id=f"S{seed}-D{dataset}-tt{tran_type_count}-p{penalty_beta}-ns{MAX_NS_COUNT}",
                                            meta="Stochastic MDP Build For Continuous Action Spaces. Story 1.",
-                                           expPrefix="python main_deterministic.py ",
+                                           expPrefix="python main_cont.py ",
                                            expSuffix=f"--env_name CartPole-cont-v1 --tran_type_count {tran_type_count} --wandb_project DACMDPCONT-V0 \
                                             --load_buffer --buffer_size 100000  --buffer_name {dataset_map[dataset]} \
                                             --data_dir /nfs/hpc/share/shrestaa/projects/dacmdp_cont/buffers/ \
@@ -58,22 +58,23 @@ for env_name in d4rlGym_envs + d4rlMaze_envs + d4rlAntmaze_envs + d4rlAirdroit_e
     for tran_type_count in [1, 5, 10, 20, 40]:
         for penalty_beta in [0,0.1,1,10,100,1000,10000,100000]:
             for MAX_NS_COUNT in [1, 5, 10, 20, 40]:
-            d4rlGymDetExps.add_experiment(Experiment(id=f"Stch-{env_name}-tt{tran_type_count}-p{penalty_beta}-ns{MAX_NS_COUNT}",
-                                           meta="Stochastic MDP Build For Continuous Action Spaces. Story 1.",
-                                           expPrefix="python main_deterministic.py ",
-                                           expSuffix=f"--env_name {env_name} --tran_type_count {tran_type_count} --wandb_project DACMDPCONT-V0 \
-                                            --load_buffer --buffer_size 1000000 \
-                                            --MAX_S_COUNT 1100000 --MAX_NS_COUNT {MAX_NS_COUNT} --mdp_build_k {MAX_NS_COUNT} --normalize_by_distance --penalty_beta {penalty_beta} --ur 0 \
-                                            --gamma 0.99 --slip_prob 0.1 --default_mode GPU --save_mdp2cache\
-                                            --eval_episode_count 100 --plcy_k 1"))
-            
+                d4rlGymDetExps.add_experiment(Experiment(id=f"Stch-{env_name}-tt{tran_type_count}-p{penalty_beta}-ns{MAX_NS_COUNT}",
+                                               meta="Stochastic MDP Build For Continuous Action Spaces. Story 1.",
+                                               expPrefix="python main_cont.py ",
+                                               expSuffix=f"--env_name {env_name} --tran_type_count {tran_type_count} --wandb_project DACMDPCONT-V0 \
+                                                --load_buffer --buffer_size 1000000 \
+                                                --MAX_S_COUNT 1100000 --MAX_NS_COUNT {MAX_NS_COUNT} --mdp_build_k {MAX_NS_COUNT} --normalize_by_distance --penalty_beta {penalty_beta} --ur 0 \
+                                                --gamma 0.99 --slip_prob 0.1 --default_mode GPU --save_mdp2cache \
+                                                --save_folder /nfs/hpc/share/shrestaa/projects/dacmdp_cont/results \
+                                                --eval_episode_count 100 --plcy_k 1"))
+
 
                                   
 ############################################################################################################################################################################
                                                                               
                                                           
 ### Main Variables #########################################################################################################################################################                                            
-pools = [cartPoleDetExps]
+pools = [cartPoleDetExps,d4rlGymDetExps]
                                                           
 # make sure experiment ids across the pools are unique                                                    
 all_exp_keys = [exp for pool in pools for exp in pool.expPool.keys()]

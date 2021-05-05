@@ -200,9 +200,10 @@ class DeterministicAgent(object):
             self._batch_parse(batch_ob, batch_a, batch_ob_prime, batch_r.view((-1,)), batch_d.view((-1,)))
 
         self.state_vec_size = len(self.parsed_transitions[0][0])
-        self.end_state_vector = tuple([404404404]*self.state_vec_size)
+        self.end_state_vector = tuple([404404]*self.state_vec_size)
         self.v_print("Step 1 [Parse Transitions]:  Complete,  Time Elapsed: {}\n\n".format(time.time() - st))
         self.v_print("length of to parse transitions", len(self.parsed_transitions))
+        
 
     # Step 2
     def build_kdtree(self):
@@ -270,8 +271,8 @@ class DeterministicAgent(object):
         # Add all to commit transitions to the MDP
         # track all to predict state action pairs
         assert len(self.s_kdTree.s2i) <= self.mdp_T.build_args.MAX_S_COUNT
-        self.mdp_T.s2i.update({s:i+2 for s,i in self.s_kdTree.s2i.items()})
-        self.mdp_T.i2s.update({i+2:s for s,i in self.s_kdTree.s2i.items()})
+        self.mdp_T.s2i.update({s:i for s,i in self.s_kdTree.s2i.items()})
+        self.mdp_T.i2s.update({i:s for s,i in self.s_kdTree.s2i.items()})
         self.a2i = {a: i for i, a in enumerate(self.tran_types)}
         self.i2a = {i: a for i, a in enumerate(self.tran_types)}
         idx_missing = 0
@@ -312,16 +313,16 @@ class DeterministicAgent(object):
 
         self.cache_buffer =  train_buffer
 
-        self.parse_all_transitions(train_buffer)
-        self.build_kdtree()
+        self.parse_all_transitions(train_buffer);time.sleep(1)
+        self.build_kdtree();time.sleep(1)
         
         if self.build_args.rebuild_mdpfcache:
             self.v_print("Rebuilding MDP: loading Cached solution Vectors from",self.build_args.save_folder)
             self.load_sol_vectors(self.build_args.save_folder, match_hash = match_hash)
         else:
-            self.intialize_dac_dynamics()
-            self.initialize_MDP()
-            self.solve_mdp()
+            self.intialize_dac_dynamics();time.sleep(1)
+            self.initialize_MDP();time.sleep(1)
+            self.solve_mdp();time.sleep(1)
             
         if self.build_args.save_mdp2cache:
             self.v_print("Caching MDP: Storing solution Vectors to",self.build_args.save_folder)
