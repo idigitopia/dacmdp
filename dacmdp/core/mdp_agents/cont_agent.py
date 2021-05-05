@@ -5,7 +5,7 @@ from collections import namedtuple
 from tqdm import tqdm
 from copy import deepcopy as cpy
 import math
-import random
+import random_policy
 from lmdp.mdp.MDP_GPU import init2zero, init2list, init2dict, init2zero_def_dict, init2zero_def_def_dict
 import time
 import numpy as np
@@ -338,7 +338,15 @@ class DeterministicAgent(object):
 
         return knn_values
 
-            
+    def get_safe_values_batch(self, s_batch, k=1):
+        knnD_batch = self.s_kdTree.get_knn_batch(s_batch, k = k)
+        knn_values = []
+        for i, knnD in enumerate(knnD_batch):
+            nn_idxs = [self.mdp_T.s2i[s] for s in knnD]
+            knn_values.append(np.mean(self.mdp_T.s_vD_cpu[nn_idxs]))
+
+        return knn_values
+
     #### Policy Functions ####
     def random_policy(self, obs):
         return self.action_space.sample()
