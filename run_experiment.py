@@ -1,11 +1,13 @@
 from dacmdp.exp_track.exp_track_helper import *
 import dacmdp.exp_track.experiments as eXP
+from dacmdp.exp_track.sweeps import MySweeps
 
 import argparse
 import os
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--exp_ids", help="Name of the project", type=str,nargs="+", default=["none"])
+parser.add_argument("--exp_ids", help="Name of the project", type=str,nargs="+", default=[])
+parser.add_argument("--sweep_ids", help="Name of the project", type=str,nargs="+", default=[])
 parser.add_argument("--append", help="string to append at the end of the command", default="")
 parser.add_argument("--remove", help="string to remove from the command", nargs="+", default=[""])
 parser.add_argument("--replace", help="string to remove from the command", nargs=2, default=["", ""])
@@ -14,7 +16,11 @@ parser.add_argument("--replace2", help="string to remove from the command", narg
 parser.add_argument("--replace3", help="string to remove from the command", nargs=2, default=["", ""])
 
 args = parser.parse_args()
-assert args.exp_ids[0] != "none", "Script name must be passed, at least one"
+assert (len(args.exp_ids) + len(args.sweep_ids)) >0, "Script name or sweep name must be passed, at least one"
+
+for sweep_id in args.sweep_ids:
+    args.exp_ids.extend(MySweeps[sweep_id].exp_ids)
+
 
 open("/tmp/{}.pk".format(args.exp_ids[0]),"wb")
 print("Appending:{} Removing:{}".format(args.append, args.remove))

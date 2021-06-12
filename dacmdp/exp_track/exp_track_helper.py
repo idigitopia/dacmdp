@@ -8,6 +8,19 @@ import os
 import numpy as np
 import socket
 
+class Sweep():
+    def __init__(self, id, sweep_params= {}, metadata = {}, exp_ids = []):
+        self.id = id 
+        self.metadata = metadata
+        self.sweep_params = sweep_params
+        self.exp_ids = exp_ids
+        
+    def add_experiment(self, exp_id):
+        self.exp_ids.append(exp_id)
+        
+    def add_metadata(self, metadata):
+        self.meta_data = self.meta_data.update(meta_data)
+        
 
 class Experiment():
     def __init__(self, id, meta="None", expPrefix="", expSuffix=""):
@@ -31,7 +44,7 @@ class ExperimentPool():
             self.add_experiment(exp)
 
     def add_experiment(self, exp):
-        assert exp.id not in self.expPool, f"{exp.id} alread taken"
+        assert exp.id not in self.expPool, f"{exp.id} already taken"
         self.expPool[exp.id] = exp
 
     def get_by_meta(self, meta):

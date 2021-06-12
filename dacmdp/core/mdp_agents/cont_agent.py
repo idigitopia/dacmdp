@@ -5,7 +5,6 @@ from collections import namedtuple
 from tqdm import tqdm
 from copy import deepcopy as cpy
 import math
-import random_policy
 from lmdp.mdp.MDP_GPU import init2zero, init2list, init2dict, init2zero_def_dict, init2zero_def_def_dict
 import time
 import numpy as np
@@ -13,10 +12,9 @@ import heapq
 from sklearn.neighbors import KDTree as RawKDTree
 import torch
 # from wrappers import *
-from math import ceil 
+from math import ceil
+import random
 from munch import munchify
-
-# MDPUnit = namedtuple('MDPUnit', 'tranProb origReward dist')
 
 import pickle as pk
 from os import path
@@ -26,9 +24,25 @@ import hashlib
 import json
 
 
-def verbose_iterator(iterator,
-                     verbose, 
-                     message = ""):
+def dict_hash(d: Dict[str, Any]) -> str:
+    """MD5 hash of a dictionary."""
+    dhash = hashlib.sha1()
+
+    if isinstance(d, dict):
+        d = {str(k): str(d[k]) for k in list(d)[::ceil(len(d) / 1000)]}
+        encoded = json.dumps(d).encode()
+
+    elif isinstance(d, list):
+        encoded = str(d[::ceil(len(d) / 1000)]).encode()
+
+    else:
+        assert False, "Type not defined for encoding "
+
+    dhash.update(encoded)
+    return dhash.hexdigest()
+
+
+def verbose_iterator(iterator, verbose, message = ""):
     if verbose:
         vb_iterator = tqdm(iterator)
         vb_iterator.set_description(message) 
@@ -51,8 +65,8 @@ class MyKDTree():
         
         self.get_knn_idxs = lambda s,k: self.get_knn_idxs_batch(np.array([s]), k)[0]
         self.get_nn_idx = lambda s: list(self.get_knn_idxs_batch(np.array([s]), 1)[0])[0]
-        self.get_nn_idx_batch = lambda s_batch: [list(knnD)[0] for knnD in self.get_knn_batch(s_batch,1)]
-        self.get_nn_idx_sub_batch = lambda s_batch: [list(knnD)[0] for knnD in self.get_knn_idxs_batch(s_batch,1)]
+        self.get_nn_idx_batch = lambda s_batch: [list(knnD)[0] for knnD in self.get_knn_idxs_batch(s_batch,1)]
+        self.get_nn_idx_sub_batch = lambda s_batch: [list(knnD)[0] for knnD in self.get_knn_idxs_sub_batch(s_batch,1)]
         
         
     def _gen_vocab(self, all_vectors):
@@ -81,12 +95,12 @@ class MyKDTree():
             nn_dict_list.extend(self.get_knn_batch(small_batch, k))
         return nn_dict_list 
     
-    def get_knn_idxs_sub_batch(self, s_batch, k, batch_size = 256, verbose = True):
+    def get_knn_idxs_sub_batch(self, s_batch, k, batch_size = 256, verbose = True, message = None):
         nn_dict_list = []
         for small_batch in verbose_iterator(iter_batch(s_batch, batch_size), verbose, message or "getting NN Idxs"):
             nn_dict_list.extend(self.get_knn_idxs_batch(small_batch, k))
         return nn_dict_list
-    
+
 
 # DAC helper functions
 def reward_logic(reward, dist, penalty_beta, penalty_type="linear"):
@@ -97,6 +111,15 @@ def reward_logic(reward, dist, penalty_beta, penalty_type="linear"):
     else:
         assert False, "Unspecified Penalty type , please check parameters"
     return disc_reward
+
+def cost_logic(dist, penalty_beta, penalty_type="linear"):
+    if penalty_type == "none":
+        cost = 0
+    elif penalty_type == "linear":
+        cost = penalty_beta * dist
+    else:
+        assert False, "Unspecified Penalty type , please check parameters"
+    return cost
 
 def kernel_probs(knn_dist_dict, delta, norm_by_dist=True):
     # todo Add a choice to do exponential averaging here.
@@ -114,10 +137,12 @@ def get_tran_types( tt_size):
     tt_tensor = zero_matrix.scatter_(1, torch.LongTensor(range(tt_size)).unsqueeze(1), 1).numpy()
     return [tuple(tt) for tt in tt_tensor]
 
+
 # DAC Agent
-class DeterministicAgent(object):
+class DACAgentBase(object):
     """
     Episodic agent is a simple nearest-neighbor based agent:
+    - Fully Deterministic Settings
     - At training time it remembers all tuples of (state, action, reward).
     - After each episode it computes the empirical value function based
         on the recorded rewards in the episode.
@@ -137,12 +162,16 @@ class DeterministicAgent(object):
         self.action_len = action_space.shape[0]
         self.action_vec_size = action_space.shape[0]
         self._verbose = False
+        
+        # Downstream Logic Placeholder
+        self.policy_calls = {"base_pi":0, "mdp_pi":0}
 
 
         has_attributes = lambda v,a_list: all([hasattr(v, a) for a in a_list])
-
-        assert has_attributes(repr_model, ["encode_action_batch", "encode_action_single","encode_state_batch",
-                                 "encode_state_single", "predict_next_state_single", "predict_next_state_batch"])
+        
+        
+        assert has_attributes(repr_model, ["encode_action_batch", "encode_action_single","encode_obs_batch",
+                                 "encode_obs_single", "predict_next_state_single", "predict_next_state_batch"])
 
         assert has_attributes(build_args, ["mdp_build_k", "normalize_by_distance",
                                         "penalty_type", "penalty_beta", "knn_delta", "tran_type_count"])
@@ -159,8 +188,6 @@ class DeterministicAgent(object):
         self.tt2i, self.i2tt = {tt:i for i,tt in enumerate(self.tran_types)}, {i:tt for i,tt in enumerate(self.tran_types)}
         self.stt2a_idx_matrix = None # Initialize after state KD Tree build
 
-        self.seed_policies()
-
 
     # utility fxn
     def verbose(self):
@@ -173,7 +200,7 @@ class DeterministicAgent(object):
     # Step 1
     def _batch_parse(self, obs_batch, a_batch, obs_prime_batch, r_batch, d_batch):
         """Parses a observation transition to state transition and stores it in a to_commit list"""
-        s_batch, s_prime_batch = map(self.repr_model.encode_state_batch, [obs_batch, obs_prime_batch])
+        s_batch, s_prime_batch = map(self.repr_model.encode_obs_batch, [obs_batch, obs_prime_batch])
         a_batch = self.repr_model.encode_action_batch(a_batch)
         r_batch = r_batch.cpu().numpy().astype(np.float32) 
         d_batch = d_batch.cpu().numpy()
@@ -181,7 +208,7 @@ class DeterministicAgent(object):
             self.parsed_transitions.append((s, a, s_prime, r, d))
 
     def _parse(self, obs, a, obs_prime, r, d):
-        s, s_prime = map(self.repr_model.encode_state_batch, [obs, obs_prime])
+        s, s_prime = map(self.repr_model.encode_obs_batch, [obs, obs_prime])
         a = self.repr_model.encode_action_single(a)
         self.parsed_transitions.append((s, a, s_prime, r, d))
 
@@ -236,11 +263,13 @@ class DeterministicAgent(object):
         
         self.tC = defaultdict(init2zero_def_def_dict)
         self.rC = defaultdict(init2zero_def_def_dict)
+        self.cC = defaultdict(init2zero_def_def_dict)
         
         # seed for end_state transitions
         for tt in self.tran_types:
             self.tC[self.end_state_vector][tt][self.end_state_vector] = 1
             self.rC[self.end_state_vector][tt][self.end_state_vector] = 0
+            self.cC[self.end_state_vector][tt][self.end_state_vector] = 0
         
         _batch_size = 256
         all_nn = []
@@ -252,13 +281,15 @@ class DeterministicAgent(object):
         for i, tran in verbose_iterator(enumerate(self.parsed_transitions),self._verbose,  "Calculating DAC Dynamics"):
             s, a, ns, r, d = tran
             for tt, (nn_s, nn_d) in zip(self.tran_types, all_nn[i].items()):
-                disc_r = reward_logic(r, nn_d, self.build_args.penalty_beta)
+                cost = cost_logic(nn_d, self.build_args.penalty_beta)
                 nn_s_a, nn_ns = list(self.orig_tD[nn_s].keys())[0], list(self.orig_tD[nn_s].values())[0]
 
                 self.stt2a_idx_matrix[self.s_kdTree.s2i[s]][self.tt2i[tt]] = self.a_kdTree.s2i[nn_s_a]
 
                 self.tC[s][tt][nn_ns] = 1
-                self.rC[s][tt][nn_ns] = disc_r
+                self.rC[s][tt][nn_ns] = r
+                self.cC[s][tt][nn_ns] = cost
+                
             
         self.v_print("Step 3 [Populate Dynamics]: Complete,  Time Elapsed: {} \n\n".format(time.time() - st))
         
@@ -285,8 +316,11 @@ class DeterministicAgent(object):
                     try:
                         s_i, a_i, ns_i = self.mdp_T.s2i[s], self.a2i[a], self.mdp_T.s2i[ns]
                         # Get Counts
-                        tran_count, r_sum = self.tC[s][a][ns], self.rC[s][a][ns]
-                        self.mdp_T.update_count_matrices(s_i, a_i, ns_i, r_sum=r_sum, count=tran_count, slot=slot, append=False)
+                        tran_count, r_sum, c_sum  = self.tC[s][a][ns], self.rC[s][a][ns], self.cC[s][a][ns]
+                        if self.mdp_T.is_factored:
+                            self.mdp_T.update_count_matrices(s_i, a_i, ns_i, r_sum=r_sum, c_sum=c_sum, count=tran_count, slot=slot, append=False)
+                        else:
+                            self.mdp_T.update_count_matrices(s_i, a_i, ns_i, r_sum=r_sum - c_sum, count=tran_count, slot=slot, append=False)
                     except: 
                         idx_missing  += 1
                 self.mdp_T.update_prob_matrices(s_i, a_i)
@@ -304,8 +338,9 @@ class DeterministicAgent(object):
         self.mdp_T.solve(eps=0.001, mode="GPU", safe_bkp=True, verbose = self.verbose)
         # self.mdp_T.refresh_cache_dicts()
 
-        # self.v_print("% of missing trans", self.mdp_T.unknown_state_action_count / (len(self.mdp_T.tD) * len(self.mdp_T.A)))
         self.v_print("Step 5 [Solve MDP]:  Complete,  Time Elapsed: {}\n\n".format(time.time() - st))
+        self.v_print("Seeding policies")
+        self.seed_policies()
 
     # Main Function
     def process(self, train_buffer, match_hash = True):
@@ -352,7 +387,7 @@ class DeterministicAgent(object):
         return self.action_space.sample()
 
     def opt_policy(self, obs):
-        return self.get_action_from_q_matrix(self.repr_model.encode_state_single(obs), self.mdp_T.qD_cpu,
+        return self.get_action_from_q_matrix(self.repr_model.encode_obs_single(obs), self.mdp_T.qD_cpu,
                                              soft=self.eval_args.soft_at_plcy,
                                              weight_nn=self.build_args.normalize_by_distance,
                                              plcy_k=self.eval_args.plcy_k)
@@ -361,7 +396,7 @@ class DeterministicAgent(object):
         return self.random_policy(obs) if (np.random.rand() < epsilon) else self.opt_policy(obs)
 
     def safe_policy(self, obs):
-        return self.get_action_from_q_matrix(self.repr_model.encode_state_single(obs), self.mdp_T.s_qD_cpu,
+        return self.get_action_from_q_matrix(self.repr_model.encode_obs_single(obs), self.mdp_T.s_qD_cpu,
                                              soft=self.eval_args.soft_at_plcy,
                                              weight_nn=self.build_args.normalize_by_distance,
                                              plcy_k=self.eval_args.plcy_k)
@@ -460,27 +495,8 @@ class DeterministicAgent(object):
         return all_distr 
     
 
-                
-def dict_hash(d: Dict[str, Any]) -> str:
-    """MD5 hash of a dictionary."""
-    dhash = hashlib.sha1()
-    
-    if isinstance(d,dict):
-        d = {str(k): str(d[k]) for k in list(d)[::ceil(len(d)/1000)]}
-        encoded = json.dumps(d).encode()
-        
-    elif isinstance(d,list):
-        encoded = str(d[::ceil(len(d)/1000)]).encode()
-        
-    else:
-        assert False, "Type not defined for encoding "
-        
-    dhash.update(encoded)
-    return dhash.hexdigest()
 
-
-
-class StochasticAgent(DeterministicAgent):
+class DACAgent(DACAgentBase):
     def __init__(self,*args,**kwargs):
         super().__init__(*args,**kwargs)
         
@@ -506,9 +522,8 @@ class StochasticAgent(DeterministicAgent):
     
     def _query_r_from_D(self, s, force_vector = False):
         return list(self.orig_rD[s].values())[0]
-        
-    
-    
+
+
     # Main Functions | Override to change the nature of the MDP
     def get_candidate_actions(self, parsed_states):
         """ return candidate actiosn for all parsed_states  | numpy array with shape  [state_count, action_count, action_vec_size]"""
@@ -526,7 +541,7 @@ class StochasticAgent(DeterministicAgent):
         
         parsed_s_candidate_action_dists = [[d for nn_s,d in self.items4tt(knn_dict)]  
                                            for knn_dict in self.parsed_s_nn_dicts]
-        
+
         self.v_print("Getting Candidate Action Distances [Complete],  Time Elapsed: {} \n".format(time.time() - st))
         return np.array(parsed_s_candidate_action_dists).astype(np.float32)
         
@@ -535,10 +550,16 @@ class StochasticAgent(DeterministicAgent):
         self.v_print("Getting predictions for given Candidate Actions"); st = time.time()
         parsed_s_candidate_predictions = [[self._query_ns_from_D(nn_s)  for nn_s,d in self.items4tt(knn_dict)]
                 for knn_dict in self.parsed_s_nn_dicts]
-        
+
         self.v_print("Getting predictions for given Candidate Actions [Complete],  Time Elapsed: {} \n\n".format(time.time() - st))
         return np.array(parsed_s_candidate_predictions).astype(np.float32)
-    
+
+    def get_candidate_predictions_knn_dicts(self, parsed_s_candidate_predictions):
+        return self.s_kdTree.get_knn_sub_batch(parsed_s_candidate_predictions.reshape(-1, self.state_vec_size),
+                                        self.build_args.mdp_build_k,
+                                        batch_size=256, verbose=self.verbose,
+                                        message="Calculating NN for all predicted states.")
+
     def get_candidate_rewards(self, parsed_states, candidate_actions):
         """ return the predictions for all candidate actions | numpy array with shape  [state_count, action_count] """
         self.v_print("Getting reward predictions for given Candidate Actions"); st = time.time()
@@ -564,12 +585,14 @@ class StochasticAgent(DeterministicAgent):
         self.orig_tD, self.orig_rD = defaultdict(init2zero_def_dict), defaultdict(init2zero_def_dict)
         self.tC = defaultdict(init2zero_def_def_dict)
         self.rC = defaultdict(init2zero_def_def_dict)
+        self.cC = defaultdict(init2zero_def_def_dict)
         
         # seed for end_state transitions
         for tt in self.tran_types:
             self.tC[self.end_state_vector][tt][self.end_state_vector] = 1
             self.rC[self.end_state_vector][tt][self.end_state_vector] = 0
-
+            self.cC[self.end_state_vector][tt][self.end_state_vector] = 0
+            
         # activates _query_action_from_D, and _query_ns_from_D
         for s, a, ns, r, d in self.parsed_transitions:
             self.orig_tD[s][a] = ns if not d else self.end_state_vector
@@ -580,8 +603,9 @@ class StochasticAgent(DeterministicAgent):
         nn_k = max(self.build_args.tran_type_count, self.build_args.mdp_build_k)
         
         # New NN variables
-        self.parsed_states = list(zip(*self.parsed_transitions))[0]
-        self.parsed_s_nn_dicts = self.s_kdTree.get_knn_sub_batch(self.parsed_states, nn_k, 
+        self.parsed_states, self.parsed_actions,  self.parsed_next_states, self.parsed_rewards, self.parsed_terminals = \
+            [np.array(v) for v in list(zip(*self.parsed_transitions))]
+        self.parsed_s_nn_dicts = self.s_kdTree.get_knn_sub_batch(self.parsed_states, nn_k,
                                                                  batch_size = 256, verbose = self.verbose, 
                                                                  message= "NN for all parsed states")
         
@@ -589,44 +613,48 @@ class StochasticAgent(DeterministicAgent):
         self.parsed_s_candidate_actions = self.get_candidate_actions(self.parsed_states) #  [state_count, action_count, action_vec_size] 
         self.parsed_s_candidate_action_dists = self.get_candidate_actions_dist(self.parsed_states, self.parsed_s_candidate_actions) # [state_count, action_count]
         self.parsed_s_candidate_predictions = self.get_candidate_predictions(self.parsed_states, self.parsed_s_candidate_actions) #  [state_count, action_count, state_vec_size]
-        self.parsed_s_candidate_rewards = self.get_candidate_rewards(self.parsed_states, self.parsed_s_candidate_actions) 
-        
-        ac_size, acd_size, sp_size = self.parsed_s_candidate_actions.shape, self.parsed_s_candidate_action_dists.shape, self.parsed_s_candidate_predictions.shape
-        self.parsed_s_candidate_predictions_knn_dicts = self.s_kdTree.get_knn_sub_batch(self.parsed_s_candidate_predictions.reshape(-1,self.state_vec_size),  self.build_args.mdp_build_k, 
-                                                                               batch_size = 256, verbose = self.verbose,
-                                                                              message = "NN for all predicted states.")
-        
+        self.parsed_s_candidate_predictions_knn_dicts = self.get_candidate_predictions_knn_dicts(self.parsed_s_candidate_predictions)
+        self.parsed_s_candidate_rewards = self.get_candidate_rewards(self.parsed_states, self.parsed_s_candidate_actions)
+
+        # Sanity Check
         assert len(self.parsed_s_candidate_actions[0]) == self.build_args.tran_type_count
         assert len(self.parsed_s_candidate_predictions[0]) == self.build_args.tran_type_count
-        
+        assert len(self.parsed_s_candidate_action_dists[0]) == self.build_args.tran_type_count
+        assert len(self.parsed_s_candidate_rewards[0]) == self.build_args.tran_type_count
+
+
         
         for s_idx, (s, a, ns, r, d) in verbose_iterator(enumerate(self.parsed_transitions),self._verbose, "Calculating DAC Dynamics"):    
             candidate_actions = self.parsed_s_candidate_actions[s_idx]
             candidate_action_dists = self.parsed_s_candidate_action_dists[s_idx]
             candidate_rewards = self.parsed_s_candidate_rewards[s_idx]
             
-            for a_idx, (tt, cand_a, cand_d, cand_r) in enumerate(zip(self.tran_types, candidate_actions, candidate_action_dists,candidate_rewards)):
-                preD_ns_idx = s_idx * len(self.tran_types) + a_idx
+            for a_idx, (tt, cand_a, cand_d, cand_r) in enumerate(zip(self.tran_types, candidate_actions, candidate_action_dists, candidate_rewards)):
+                
                 # tt to action map 
                 self.stt2a_idx_matrix[self.s_kdTree.s2i[s]][self.tt2i[tt]] = self.a_kdTree.s2i[tuple(cand_a)]
                 
-                preD_ns_nn_dict_idx = s_idx*self.build_args.tran_type_count + a_idx
+                preD_ns_idx = s_idx * len(self.tran_types) + a_idx
                 pred_ns_nn_dict = {nn_s: d + cand_d for nn_s,d in self.parsed_s_candidate_predictions_knn_dicts[preD_ns_idx].items()}
                 pred_ns_probs = kernel_probs(pred_ns_nn_dict, delta=self.build_args.knn_delta,
                                                 norm_by_dist = self.build_args.normalize_by_distance)
                     
                 # We are only concerned with transition counts in this phase. 
                 # All transition counts will be properly converted to tran prob while inserting in MDP
-                disc_r = reward_logic(cand_r, list(pred_ns_nn_dict.values())[0], self.build_args.penalty_beta)
+                # Reward can be a function of distance of the nn of the prediction, or can also be accounted for individually. 
+                cand_c = cost_logic(list(pred_ns_nn_dict.values())[0], self.build_args.penalty_beta)
 
                 for dist, (pred_ns, prob) in zip(pred_ns_nn_dict.values(), pred_ns_probs.items()):
-                     # reward discounted by the distance to state used for tt->a mapping. 
+                    # reward discounted by the distance to state used for tt->a mapping. 
                     self.tC[s][tt][pred_ns] = int(prob*100)
-                    self.rC[s][tt][pred_ns] = disc_r*int(prob*100)
+                    self.rC[s][tt][pred_ns] = cand_r*int(prob*100)
+                    self.cC[s][tt][pred_ns] = cand_c*int(prob*100)
             
         self.v_print("Step 3 [Populate Dynamics]: Complete,  Time Elapsed: {} \n\n".format(time.time() - st))
 
-class StochasticAgentWithDelta(StochasticAgent):
+
+
+class DACAgentDelta(DACAgent):
     def __init__(self,*args,**kwargs):
         super().__init__(*args,**kwargs)
         
@@ -642,8 +670,21 @@ class StochasticAgentWithDelta(StochasticAgent):
 
         return np.array(parsed_s_candidate_pred_vectors).astype(np.float32)
 
+        
+    def get_candidate_rewards(self, parsed_states, candidate_actions):
+        """ return the predictions for all candidate actions | numpy array with shape  [state_count, action_count] """
+        self.v_print("Getting reward predictions for given Candidate Actions"); st = time.time()
+        parsed_s_candidate_rewards = [[self._query_r_from_D(nn_s)  for nn_s,d in self.items4tt(knn_dict)]
+                for knn_dict in self.parsed_s_nn_dicts]
+        
+        self.v_print("Getting reward predictions for given Candidate Actions [Complete],  Time Elapsed: {} \n\n".format(time.time() - st))
+        return np.array(parsed_s_candidate_rewards).astype(np.float32)
 
-class StochasticAgentWithParametricPredFxn(StochasticAgent):
+
+class DACAgentThetaDynamics(DACAgent):
+    """
+    DAC Agent with Parametric prediction Function. as Dynamics model.
+    """
     def __init__(self,*args,**kwargs):
         super().__init__(*args,**kwargs)
     
@@ -663,39 +704,104 @@ class StochasticAgentWithParametricPredFxn(StochasticAgent):
         
         parsed_pred_states = [self.repr_model.predict_next_state_batch(to_pred_s[idxs], to_pred_a[idxs]) for idxs in batch_iterator]      
         parsed_s_candidate_predictions = np.concatenate(parsed_pred_states)
-        pred_shape = (-1,self.build_args.tran_type_count,self.state_vec_size)
+        pred_shape = (len(self.parsed_states),self.build_args.tran_type_count,self.state_vec_size)
         
         return np.array(parsed_s_candidate_predictions).astype(np.float32).reshape(pred_shape)
             
-    
+
         
-class StchPlcyEvalAgent(StochasticAgentWithParametricPredFxn):
-    def __init__(self, *args,**kwargs):
-        super().__init__(*args,**kwargs)
-        print("In StchPlcyEvalAgent")
+    def get_candidate_rewards(self, parsed_states, candidate_actions):
+        """ return the predictions for all candidate actions | numpy array with shape  [state_count, action_count] """
+        assert len(parsed_states) == len(candidate_actions)
+        assert len(candidate_actions[0]) == self.build_args.tran_type_count
+        assert len(candidate_actions[0][0]) == self.action_vec_size
         
-        # Encoding Functions
-        if self.build_args.tran_type_count != 1:
-            print("Warining: tran_type_count must be 1 for policy Evaluation")
-        
-    # Main Functions | Override to change the nature of the MDP
-    def get_candidate_actions(self, parsed_states):
-        """ return candidate actiosn for all parsed_states  | numpy array with shape  [state_count, action_count, action_vec_size]"""
         _batch_size = 256
-        batch_iterator = verbose_iterator(iterator = iter_batch(range(len(self.cache_buffer)), _batch_size), 
+        to_pred_s = np.repeat(parsed_states, self.build_args.tran_type_count, axis=0).reshape(-1, self.state_vec_size)
+        to_pred_a = np.array(candidate_actions).reshape(-1, self.action_vec_size)
+        
+        batch_iterator = verbose_iterator(iterator = iter_batch(range(len(to_pred_s)), _batch_size), 
                                           verbose = self._verbose, 
-                                         message = "Getting actions using policy model")
-        parsed_pred_actions = [self.repr_model.predict_action_batch(self.cache_buffer.sample_indices(idxs)[0])
-                                        for idxs in batch_iterator]
-        parsed_s_candidate_actions = np.expand_dims(np.concatenate(parsed_pred_actions), 1)
+                                          message = "Getting Reward predictions using Reward model")
         
-        self.parsed_actions = np.unique(parsed_s_candidate_actions.reshape(-1,self.action_len),axis=0)
-        self.a_kdTree = MyKDTree(self.parsed_actions)
+        parsed_pred_rewards = [self.repr_model.predict_reward_batch(to_pred_s[idxs], to_pred_a[idxs]) for idxs in batch_iterator]      
+        parsed_s_candidate_rewards = np.concatenate(parsed_pred_rewards)
         
-        return parsed_s_candidate_actions
-    
-        
+        return np.array(parsed_s_candidate_rewards).astype(np.float32).reshape((len(self.parsed_states),self.build_args.tran_type_count))
+
+
+class DACAgentSARepr(DACAgent):
+    """
+    DAC Agent with Parametric prediction Function. as Dynamics model.
+    """
+
+    def __init__(self,*args,**kwargs):
+        super().__init__(*args,**kwargs)
+
+    # Main Functions | Override to change the nature of the MDP
+    # def get_candidate_actions(self, parsed_states): # Unchanged
+
     def get_candidate_actions_dist(self, parsed_states, candidate_actions):
-        print("Dummy action distance implemented: May need some further consideration")
+        """ return dists of all candidate actions  | numpy array with shape [state_count, action_count]"""
+        self.v_print("Getting distanceds for the given candidate actions");
+        st = time.time()
+        self.v_print("Getting Candidate Action Distances [Complete],  Time Elapsed: {} \n".format(time.time() - st))
         return np.zeros(self.parsed_s_candidate_actions.shape[:-1]).astype(np.float32)
-        
+
+    # Main Functions | Override to change the nature of the MDP
+    def get_candidate_predictions(self,  parsed_states, candidate_actions):
+        assert len(parsed_states) == len(candidate_actions)
+        assert len(candidate_actions[0]) == self.build_args.tran_type_count
+        assert len(candidate_actions[0][0]) == self.action_vec_size
+
+        _batch_size = 256
+        to_pred_s = np.repeat(parsed_states, self.build_args.tran_type_count, axis=0).reshape(-1, self.state_vec_size)
+        to_pred_a = np.array(candidate_actions).reshape(-1, self.action_vec_size)
+
+        batch_iterator = verbose_iterator(iterator=iter_batch(range(len(to_pred_s)), _batch_size),
+                                          verbose=self._verbose,
+                                          message="Getting SA representation for candidate state actions using Dynamics model")
+
+        self.parsed_s_candidate_sa_pairs = np.concatenate([self.repr_model.encode_state_action_batch(to_pred_s[idxs], to_pred_a[idxs]) for idxs in
+                              batch_iterator])
+
+        pred_shape = (len(self.parsed_states), self.build_args.tran_type_count, self.state_vec_size)
+        return np.zeros(pred_shape)
+
+    def get_candidate_predictions_knn_dicts(self, parsed_s_candidate_predictions):
+        # make sa kd tree
+        # search for knn s_idxs for all candidate sa representations.
+        # find the ns fore each s_idxs.
+        _batch_size = 256
+
+        self.v_print("Making new kD tree with state action representation for given transitions")
+        batch_iterator = verbose_iterator(iterator=iter_batch(range(len(self.parsed_states)), _batch_size),
+                                          verbose=self._verbose,
+                                          message="Getting SA representation for parsed state and actions")
+
+        self.parsed_sa_pairs = np.concatenate(
+            [self.repr_model.encode_state_action_batch(self.parsed_states[idxs], self.parsed_actions[idxs]) for idxs in
+             batch_iterator])
+
+        self.sa_kdTree = MyKDTree(self.parsed_s_candidate_sa_pairs)
+
+
+
+        self.candidate_sa_pairs_nn_idxs_dicts = self.sa_kdTree.get_knn_idxs_sub_batch(self.parsed_s_candidate_sa_pairs.reshape(-1, self.state_vec_size),
+                                               self.build_args.mdp_build_k,
+                                               batch_size=256, verbose=self.verbose,
+                                               message="Calculating NN for all predicted states.")
+
+        candidate_predictions_knn_dicts = [{self.parsed_next_states[nn_idx]:dist for nn_idx,dist in knn_dict} for knn_dict in self.candidate_sa_pairs_nn_idxs_dicts]
+        return candidate_predictions_knn_dicts
+
+
+    def get_candidate_rewards(self, parsed_states, candidate_actions): # Unchanged
+        """ return the predictions for all candidate actions | numpy array with shape  [state_count, action_count] """
+        self.v_print("Getting reward predictions for given Candidate Actions");
+        st = time.time()
+        parsed_s_candidate_rewards = [self.parsed_rewards[next(iter(knn_idx_dict))] for knn_idx_dict in self.parsed_s_nn_dicts]
+
+        self.v_print("Getting reward predictions for given Candidate Actions [Complete],  Time Elapsed: {} \n\n".format(
+            time.time() - st))
+        return np.array(parsed_s_candidate_rewards).astype(np.float32)

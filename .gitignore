@@ -6,6 +6,7 @@ results
 *.egg
 *.pyc
 *.coveragei
+mdp_results
 wandb
 scraps
 media

@@ -6,13 +6,21 @@ import hashlib
 from datetime import datetime
 from os import path
 import os
+import sys
 
 class BaseConfig(object):
     def __init__(self, arg_str=None):
-        
+
+        # Override this function if you wish to add more param groups to the parser. 
+        self.modify_parser = lambda parser: parser
+                
         # Initialize Base Arguments
-        arg_groups = self._get_arg_groups(arg_str)
+        self._initialize(arg_str)
+        
+    def _initialize(self, arg_str):
+        arg_groups =  self._get_arg_groups(arg_str)
         self.arg_gnames = list(arg_groups)
+        
         for group_name, args in arg_groups.items():
             setattr(self,group_name,args)
 
@@ -24,7 +32,7 @@ class BaseConfig(object):
         root_dir = os.getenv('DACMDP_ROOT_DIR', default='results')
         self.logArgs.results_folder = path.join(root_dir,self.envArgs.env_name,self.logArgs.wandb_id) \
                                         if self.logArgs.results_folder == "default" else self.logArgs.results_folder
-        self.mdpBuildArgs.save_folder = os.path.join(save_path,f"mdp_results/D-{dynamics_id}P-{pretrained_label}/DET-TT{tran_type_count}-K{mdp_build_k}-P{penalty_beta}/Dev{mdp_config.dataArgs.buffer_device}/" ) \
+        self.mdpBuildArgs.save_folder = os.path.join(f".mdp_results/{self.logArgs.wandb_id}" ) \
                                         if self.mdpBuildArgs.save_folder == "default" else self.mdpBuildArgs.save_folder
         
         if self.logArgs.cache_mdp2wandb and not self.mdpBuildArgs.save_mdp2cache:
@@ -36,31 +44,9 @@ class BaseConfig(object):
         
     def pad_datetime(self,s):
         return s + "-" + datetime.now().strftime('%b%d_%H-%M-%S')
+
     
-    @property
-    def flat_args(self):
-        args = {}
-        for grp_name in self.arg_gnames:
-            group = getattr(self,grp_name)
-            for arg_name, arg_value in group.items():
-                args[f"{grp_name}:{arg_name}"] = arg_value
-        return args
-    
-    def __str__(self):
-        get_header = lambda title: "#" * 45 + " " * 4 + title + " " * 4 + "#" * 45
-        out_str = get_header("All Arguments") + "\n"
-        for grp_name in self.arg_gnames: 
-            group = getattr(self,grp_name)
-            out_str+="\n" + get_header(grp_name) + "\n"
-            for arg1, arg2 in itertools.zip_longest(*[iter(group.items())]*2):
-                out_str+=f"{str(arg1[0]).ljust(30)}:{str(arg1[1]).ljust(30)}" + \
-                      (f"{str(arg2[0]).ljust(30)}:{str(arg2[1])}" if arg2 else "") + "\n"
-
-        out_str+="\n" + "#" * len(get_header("All Arguments"))
-        return out_str
-
-
-    def _get_arg_groups(self,s = None):
+    def _get_parser(self):
         parser = argparse.ArgumentParser()
 
         # Env Arguments
@@ -99,6 +85,7 @@ class BaseConfig(object):
 
         # MDP Build parameters
         mdpBuildArgs = parser.add_argument_group(title="mdpBuildArgs", description="MDP build arguments")
+        mdpBuildArgs.add_argument("--agent_class", help="Name of the mdp Agent to be used.", default= "StochasticAgent")
         mdpBuildArgs.add_argument("--rmax_reward", help="Default reward for RMAX reward", type=int, default= 10000)
         mdpBuildArgs.add_argument("--balanced_exploration", help="Try to go to all states equally often", type=int, default= 0)
         mdpBuildArgs.add_argument("--rmax_threshold", help="Number of travesal before annealing rmax reward", type=int, default= 2)
@@ -130,6 +117,7 @@ class BaseConfig(object):
 
         # Evaluation Parameters
         evalArgs = parser.add_argument_group(title="evalArgs", description="Evaluation Arguments")
+        evalArgs.add_argument("--eval_threshold_quantile", help="Quantile to cap the uncertainty metric in the dataset", type = float, default= 0.9)
         evalArgs.add_argument("--eval_episode_count", help="Number of episodes to evaluate the policy", type=int, default=50)
         evalArgs.add_argument("--soft_at_plcy", help="Sample according to Q values rather than max action", action="store_true")
         evalArgs.add_argument("--plcy_k", help="Set the lift up parameter policy_k you want to test with",  type= int, default=1)
@@ -137,7 +125,11 @@ class BaseConfig(object):
         evalArgs.add_argument("--plcy_sweep_k", help="List the sweep lift up parameter policy_k you want to test with", nargs="+", type= int, default=[1,5,11]) 
 
         # parser.add_argument("--all_gammas", help="Name of the Environment to guild", type=int, default= "[0.1 ,0.9 ,0.99 ,0.999]")
+        
+        return self.modify_parser(parser)
 
+    def _get_arg_groups(self,s = None):
+        parser = self._get_parser()
 
         # Parse Arguments
         parsedArgs = parser.parse_args(s.split(" ") if s is not None else None)
@@ -151,6 +143,30 @@ class BaseConfig(object):
             argGroups[title]={a.dest:getattr(parsedArgs,a.dest,None) for a in group._group_actions}
 
         return munchify(argGroups)
+    
+    
+    @property
+    def flat_args(self):
+        args = {}
+        for grp_name in self.arg_gnames:
+            group = getattr(self,grp_name)
+            for arg_name, arg_value in group.items():
+                args[f"{grp_name}:{arg_name}"] = arg_value
+        return args
+    
+    def __str__(self):
+        get_header = lambda title: "#" * 45 + " " * 4 + title + " " * 4 + "#" * 45
+        out_str = get_header("All Arguments") + "\n"
+        for grp_name in self.arg_gnames: 
+            group = getattr(self,grp_name)
+            out_str+="\n" + get_header(grp_name) + "\n"
+            for arg1, arg2 in itertools.zip_longest(*[iter(group.items())]*2):
+                out_str+=f"{str(arg1[0]).ljust(30)}:{str(arg1[1]).ljust(30)}" + \
+                      (f"{str(arg2[0]).ljust(30)}:{str(arg2[1])}" if arg2 else "") + "\n"
+
+        out_str+="\n" + "#" * len(get_header("All Arguments"))
+        return out_str
+    
 
 def print_args(argGroups, to_show_groups=None):
     get_header = lambda title: "#" * 45 + " " * 4 + title + " " * 4 + "#" * 45
@@ -167,9 +183,9 @@ def print_args(argGroups, to_show_groups=None):
         
     print("\n","#" * len(get_header("All Arguments")) if all_args_flag else "")
 
-def wandbify_args(argGroups):
-    args = {}
-    for grp_name, group in argGroups.items():
-        for arg_name, arg_value in group.items():
-            args[f"{grp_name}:{arg_name}"] = arg_value
-    return args
+# def wandbify_args(argGroups):
+#     args = {}
+#     for grp_name, group in argGroups.items():
+#         for arg_name, arg_value in group.items():
+#             args[f"{grp_name}:{arg_name}"] = arg_value
+#     return args
