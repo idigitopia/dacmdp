@@ -10,14 +10,11 @@ import time
 import numpy as np
 import heapq
 from sklearn.neighbors import KDTree as RawKDTree
-import torch
-# from wrappers import *
+
 from math import ceil
 import random
-from munch import munchify
 
 import pickle as pk
-from os import path
 
 from typing import Dict, Any
 import hashlib
@@ -25,7 +22,7 @@ import json
 
 
 def dict_hash(d: Dict[str, Any]) -> str:
-    """MD5 hash of a dictionary."""
+    """returns an MD5 hash of a dictionary."""
     dhash = hashlib.sha1()
 
     if isinstance(d, dict):
@@ -42,7 +39,11 @@ def dict_hash(d: Dict[str, Any]) -> str:
     return dhash.hexdigest()
 
 
-def verbose_iterator(iterator, verbose, message = ""):
+def v_iter(iterator, verbose, message = ""):
+    """
+    Returns a verbose iterator i.e. tqdm enabled iterator if verbose is True. 
+    It also attaches the passed message to the iterator.
+    """
     if verbose:
         vb_iterator = tqdm(iterator)
         vb_iterator.set_description(message) 
@@ -54,6 +55,11 @@ def verbose_iterator(iterator, verbose, message = ""):
 
 # KD Tree helper function
 class MyKDTree():
+    """
+    Class to contain all the KD Tree related logics. 
+    - Builds the index and inverseIndex for the vectors passed as the vocabulary for knn 
+    - can get k/1 NN or k/1 NN of a batch of passed query vectors. 
+    """
     def __init__(self, all_vectors):
         self.s2i, self.i2s = self._gen_vocab(all_vectors)
         self.KDtree = RawKDTree(np.array(list(self.s2i.keys())))
@@ -70,11 +76,20 @@ class MyKDTree():
         
         
     def _gen_vocab(self, all_vectors):
+        """
+        generate index mappings and inverse index mappings. 
+        """
+        
         s2i = {tuple(s):i for i,s in enumerate(all_vectors)}
         i2s = {i:tuple(s) for i,s in enumerate(all_vectors)}
         return s2i, i2s
 
     def get_knn_batch(self, s_batch, k):
+        """
+        input: a list of query vectors. 
+        output: a list of k-nn tuples for each query vector. 
+        """
+
         s_batch = list(map(tuple, s_batch))
         dists_b, idxs_b = self.KDtree.query(np.array(s_batch), k=k)
         get_nn_dict = lambda dists, idxs: {self.i2s[int(idx)]: dist for dist, idx in zip(dists,idxs)}
@@ -82,6 +97,11 @@ class MyKDTree():
         return nn_dict_list
     
     def get_knn_idxs_batch(self, s_batch, k):
+        """
+        input: a list of query vectors. 
+        output: a list of k-nn idxs for each query vector.
+        """
+            
         s_batch = list(map(tuple, s_batch))
         dists_b, idxs_b = self.KDtree.query(np.array(s_batch), k=k)
         get_nn_dict = lambda dists, idxs: {idx: dist for dist, idx in zip(dists,idxs)}
@@ -90,14 +110,20 @@ class MyKDTree():
     
     # Get knn with smaller batch sizes. | useful when passing large batches. 
     def get_knn_sub_batch(self, s_batch, k, batch_size = 256, verbose = True, message = None):
+        """
+        # Get knn with smaller batch sizes. | useful when passing large batches.
+        input: a large list of query vectors. 
+        output: a large list of k-nn tuples for each query vector. 
+        """
+            
         nn_dict_list = []
-        for small_batch in verbose_iterator(iter_batch(s_batch, batch_size), verbose, message or "getting NN"):
+        for small_batch in v_iter(iter_batch(s_batch, batch_size), verbose, message or "getting NN"):
             nn_dict_list.extend(self.get_knn_batch(small_batch, k))
         return nn_dict_list 
     
     def get_knn_idxs_sub_batch(self, s_batch, k, batch_size = 256, verbose = True, message = None):
         nn_dict_list = []
-        for small_batch in verbose_iterator(iter_batch(s_batch, batch_size), verbose, message or "getting NN Idxs"):
+        for small_batch in v_iter(iter_batch(s_batch, batch_size), verbose, message or "getting NN Idxs"):
             nn_dict_list.extend(self.get_knn_idxs_batch(small_batch, k))
         return nn_dict_list
 
@@ -112,6 +138,7 @@ def reward_logic(reward, dist, penalty_beta, penalty_type="linear"):
         assert False, "Unspecified Penalty type , please check parameters"
     return disc_reward
 
+
 def cost_logic(dist, penalty_beta, penalty_type="linear"):
     if penalty_type == "none":
         cost = 0
@@ -120,6 +147,7 @@ def cost_logic(dist, penalty_beta, penalty_type="linear"):
     else:
         assert False, "Unspecified Penalty type , please check parameters"
     return cost
+
 
 def kernel_probs(knn_dist_dict, delta, norm_by_dist=True):
     # todo Add a choice to do exponential averaging here.
@@ -132,7 +160,8 @@ def kernel_probs(knn_dist_dict, delta, norm_by_dist=True):
         
     return all_knn_probs
 
-def get_tran_types( tt_size):
+
+def get_tran_types(tt_size):
     zero_matrix = torch.zeros((tt_size, tt_size), dtype=torch.float32, device="cpu")
     tt_tensor = zero_matrix.scatter_(1, torch.LongTensor(range(tt_size)).unsqueeze(1), 1).numpy()
     return [tuple(tt) for tt in tt_tensor]
@@ -191,15 +220,26 @@ class DACAgentBase(object):
 
     # utility fxn
     def verbose(self):
+        """ 
+        Set Verbose Flag
+        """
         self._verbose = True
         return self
 
     def v_print(self,*args, **kwargs):
+        """
+        prints if verbose flag is set. 
+        """
         if self._verbose: print(*args, **kwargs)
 
     # Step 1
     def _batch_parse(self, obs_batch, a_batch, obs_prime_batch, r_batch, d_batch):
-        """Parses a observation transition to state transition and stores it in a to_commit list"""
+        """
+        Parses the transition batch and converts observations into states 
+        using the repr_model.encode_obs_batch function. 
+        stores the parsed transitions with states into parsed_transitions arraay. 
+        """
+        
         s_batch, s_prime_batch = map(self.repr_model.encode_obs_batch, [obs_batch, obs_prime_batch])
         a_batch = self.repr_model.encode_action_batch(a_batch)
         r_batch = r_batch.cpu().numpy().astype(np.float32) 
@@ -208,17 +248,27 @@ class DACAgentBase(object):
             self.parsed_transitions.append((s, a, s_prime, r, d))
 
     def _parse(self, obs, a, obs_prime, r, d):
+        """
+        Parses the transition and converts observations into states 
+        using the repr_model.encode_obs_batch function. 
+        stores the parsed transition with states into parsed_transitions arraay. 
+        """ 
+        
         s, s_prime = map(self.repr_model.encode_obs_batch, [obs, obs_prime])
         a = self.repr_model.encode_action_single(a)
         self.parsed_transitions.append((s, a, s_prime, r, d))
 
-    def parse_all_transitions(self, buffer):
-        """ Populates self.parsed_transitions using batch_parse function"""
+    def parse_all_transitions(self, buffer, _batch_size = 256):
+        """ 
+        Iteratively populates self.parsed_transitions using batch_parse function and the passed dataset/buffer 
+        """
+        
         self.v_print("Step 1 (Parse Transitions):  Running");
         st = time.time()
 
-        _batch_size = 256
-        batch_iterator = verbose_iterator(iter_batch(range(len(buffer)), _batch_size), self._verbose, "Calculating latent repr from observations")
+        batch_iterator = v_iter(iter_batch(range(len(buffer)), _batch_size), 
+                                          self._verbose,
+                                          "Calculating latent repr from observations")
 
         for idxs in batch_iterator:
             batch = buffer.sample_indices(idxs)
@@ -275,10 +325,10 @@ class DACAgentBase(object):
         all_nn = []
         all_states = list(zip(*self.parsed_transitions))[0]
 
-        for s_batch in verbose_iterator(iter_batch(all_states, _batch_size),self._verbose):
+        for s_batch in v_iter(iter_batch(all_states, _batch_size),self._verbose):
             all_nn.extend(self.s_kdTree.get_knn_batch(s_batch, self.build_args.tran_type_count))
 
-        for i, tran in verbose_iterator(enumerate(self.parsed_transitions),self._verbose,  "Calculating DAC Dynamics"):
+        for i, tran in v_iter(enumerate(self.parsed_transitions),self._verbose,  "Calculating DAC Dynamics"):
             s, a, ns, r, d = tran
             for tt, (nn_s, nn_d) in zip(self.tran_types, all_nn[i].items()):
                 cost = cost_logic(nn_d, self.build_args.penalty_beta)
@@ -306,10 +356,10 @@ class DACAgentBase(object):
         self.mdp_T.i2s.update({i:s for s,i in self.s_kdTree.s2i.items()})
         self.a2i = {a: i for i, a in enumerate(self.tran_types)}
         self.i2a = {i: a for i, a in enumerate(self.tran_types)}
-        idx_missing = 0
+        idx_found, idx_missing = 0, 0
         # todo account for filled_mask
 
-        for s in verbose_iterator(self.tC,self._verbose,  "Writing DAC Dynamics to MDP"):
+        for s in v_iter(self.tC,self._verbose,  "Writing DAC Dynamics to MDP"):
             for a in self.tC[s]:
                 for slot, ns in enumerate(self.tC[s][a]):
                     # Get Indexes
@@ -321,12 +371,13 @@ class DACAgentBase(object):
                             self.mdp_T.update_count_matrices(s_i, a_i, ns_i, r_sum=r_sum, c_sum=c_sum, count=tran_count, slot=slot, append=False)
                         else:
                             self.mdp_T.update_count_matrices(s_i, a_i, ns_i, r_sum=r_sum - c_sum, count=tran_count, slot=slot, append=False)
-                    except: 
+                        idx_found += 1
+                    except ValueError: 
                         idx_missing  += 1
                 self.mdp_T.update_prob_matrices(s_i, a_i)
 
         self.v_print("Step 4 [Initialize MDP]: Complete,  Time Elapsed: {}".format(time.time() - st))
-        self.v_print(f"Missing Idx count:{idx_missing} \n\n")
+        self.v_print(f"Processed Idx count:{idx_found}, Missing Idx count:{idx_missing} \n\n")
         
 
     # step 5
@@ -624,7 +675,7 @@ class DACAgent(DACAgentBase):
 
 
         
-        for s_idx, (s, a, ns, r, d) in verbose_iterator(enumerate(self.parsed_transitions),self._verbose, "Calculating DAC Dynamics"):    
+        for s_idx, (s, a, ns, r, d) in v_iter(enumerate(self.parsed_transitions),self._verbose, "Calculating DAC Dynamics"):    
             candidate_actions = self.parsed_s_candidate_actions[s_idx]
             candidate_action_dists = self.parsed_s_candidate_action_dists[s_idx]
             candidate_rewards = self.parsed_s_candidate_rewards[s_idx]
@@ -698,7 +749,7 @@ class DACAgentThetaDynamics(DACAgent):
         to_pred_s = np.repeat(parsed_states, self.build_args.tran_type_count, axis=0).reshape(-1, self.state_vec_size)
         to_pred_a = np.array(candidate_actions).reshape(-1, self.action_vec_size)
         
-        batch_iterator = verbose_iterator(iterator = iter_batch(range(len(to_pred_s)), _batch_size), 
+        batch_iterator = v_iter(iterator = iter_batch(range(len(to_pred_s)), _batch_size), 
                                           verbose = self._verbose, 
                                           message = "Getting predictions using Dynamics model")
         
@@ -720,7 +771,7 @@ class DACAgentThetaDynamics(DACAgent):
         to_pred_s = np.repeat(parsed_states, self.build_args.tran_type_count, axis=0).reshape(-1, self.state_vec_size)
         to_pred_a = np.array(candidate_actions).reshape(-1, self.action_vec_size)
         
-        batch_iterator = verbose_iterator(iterator = iter_batch(range(len(to_pred_s)), _batch_size), 
+        batch_iterator = v_iter(iterator = iter_batch(range(len(to_pred_s)), _batch_size), 
                                           verbose = self._verbose, 
                                           message = "Getting Reward predictions using Reward model")
         
@@ -758,7 +809,7 @@ class DACAgentSARepr(DACAgent):
         to_pred_s = np.repeat(parsed_states, self.build_args.tran_type_count, axis=0).reshape(-1, self.state_vec_size)
         to_pred_a = np.array(candidate_actions).reshape(-1, self.action_vec_size)
 
-        batch_iterator = verbose_iterator(iterator=iter_batch(range(len(to_pred_s)), _batch_size),
+        batch_iterator = v_iter(iterator=iter_batch(range(len(to_pred_s)), _batch_size),
                                           verbose=self._verbose,
                                           message="Getting SA representation for candidate state actions using Dynamics model")
 
@@ -775,7 +826,7 @@ class DACAgentSARepr(DACAgent):
         _batch_size = 256
 
         self.v_print("Making new kD tree with state action representation for given transitions")
-        batch_iterator = verbose_iterator(iterator=iter_batch(range(len(self.parsed_states)), _batch_size),
+        batch_iterator = v_iter(iterator=iter_batch(range(len(self.parsed_states)), _batch_size),
                                           verbose=self._verbose,
                                           message="Getting SA representation for parsed state and actions")
 

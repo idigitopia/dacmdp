@@ -166,3 +166,12 @@ class BCQEncoderNet():
 
     def predict_batch_transition(self, o_batch, a_batch):
         assert False, "Not Implemented Error"
+
+        
+# class TD3EncoderNet(DummyNet):
+#     def __init__(self, TD3_net, device):
+#         self.td3_net = TD3_net.to(device)
+#         self.device = device
+        
+#     self.
+        

@@ -53,12 +53,12 @@ def d4rl_template(agent_class, env_name, tran_type_count, penalty_beta, MAX_NS_C
                                                     --eval_episode_count 100 --plcy_k 1")
 
 
-for env_name in d4rlGym_envs + d4rlMaze_envs + d4rlAntmaze_envs + d4rlAirdroit_envs:
-    for agent_class in agent_classes:
-        for tran_type_count in [1, 5, 10, 20, 40]:
-            for penalty_beta in [0,0.1,1,10,100,1000,10000,100000]:
-                for MAX_NS_COUNT in [1, 5, 10, 20, 40]:
-                    d4rlExps.add_experiment()
+# for env_name in d4rlGym_envs + d4rlMaze_envs + d4rlAntmaze_envs + d4rlAirdroit_envs:
+#     for agent_class in agent_classes:
+#         for tran_type_count in [1, 5, 10, 20, 40]:
+#             for penalty_beta in [0,0.1,1,10,100,1000,10000,100000]:
+#                 for MAX_NS_COUNT in [1, 5, 10, 20, 40]:
+#                     d4rlExps.add_experiment()
 
 
                                   
