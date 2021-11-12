@@ -83,9 +83,16 @@ class BaseConfig(object):
         dataArgs.add_argument("--load_buffer", help="Do a bellman backups every __k frames", action="store_true")
         dataArgs.add_argument("--buffer_device", help="Default device to use for the sampled tensors", type=str, default= "cpu")
 
+        
+        # Representation Arguments
+        mdpBuildArgs = parser.add_argument_group(title="reprArgs", description="Dataset transformation / repr arguments")
+        mdpBuildArgs.add_argument("--repr_build", help="Name of the repr build which will be used to build the DAC Agent.", default= "identity")
+        
+        
         # MDP Build parameters
         mdpBuildArgs = parser.add_argument_group(title="mdpBuildArgs", description="MDP build arguments")
-        mdpBuildArgs.add_argument("--agent_class", help="Name of the mdp Agent to be used.", default= "StochasticAgent")
+        mdpBuildArgs.add_argument("--dac_build", help="Name of the dac build which will be used to build the DAC Agent.", default= "DACAgentBase")
+        
         mdpBuildArgs.add_argument("--rmax_reward", help="Default reward for RMAX reward", type=int, default= 10000)
         mdpBuildArgs.add_argument("--balanced_exploration", help="Try to go to all states equally often", type=int, default= 0)
         mdpBuildArgs.add_argument("--rmax_threshold", help="Number of travesal before annealing rmax reward", type=int, default= 2)
@@ -182,6 +189,7 @@ def print_args(argGroups, to_show_groups=None):
                   f"{str(arg2[0]).ljust(30)}:{str(arg2[1])}" if arg2 else "")
         
     print("\n","#" * len(get_header("All Arguments")) if all_args_flag else "")
+
 
 # def wandbify_args(argGroups):
 #     args = {}

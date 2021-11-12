@@ -5,7 +5,8 @@ import policybazaar
 import torch
 import wandb
 from .core.args import BaseConfig as MDPBaseConfig
-from .core.mdp_agents.cont_agent import DACAgentBase,get_tran_types, DACAgent, DACAgentDelta,  DACAgentThetaDynamics, DACAgentSARepr
+from .core.mdp_agents.disc_agent import DACAgentBase 
+from .core.mdp_agents.cont_agent import DACAgentCont, DACAgentDelta,  DACAgentThetaDynamics, DACAgentSARepr
 from .core.mdp_agents.pi_agent import DACAgentThetaDynamicsBiasPi, DACAgentThetaDynamicsPlusPi,  DACAgentThetaDynamicsPlusPiWithOODEval
 from .core.repr_nets import DummyNet, LatentDynamicsNet, LatentPolicyNetObs, LatentPolicyNetState
 
@@ -102,51 +103,51 @@ def get_buffer(env, config, dataset, policy):
 
 
 
-def get_mdp_agent_wrapper(env, agent_model_class, repr_model, mdp_config, build=True, dataset=None, dataset_size = None, factored_mdp = True):    
+# def get_mdp_agent_wrapper(env, agent_model_class, repr_model, mdp_config, build=True, dataset=None, dataset_size = None, factored_mdp = True):    
     
-    # Prep Logic
-    if dataset is not None:
-        assert dataset_size is not None
-        mdp_config.dataArgs.buffer_size = dataset_size
-        mdp_config.mdpBuildArgs.MAX_S_COUNT = int(1.1*dataset_size)
+#     # Prep Logic
+#     if dataset is not None:
+#         assert dataset_size is not None
+#         mdp_config.dataArgs.buffer_size = dataset_size
+#         mdp_config.mdpBuildArgs.MAX_S_COUNT = int(1.1*dataset_size)
 
-    if mdp_config.wrapperArgs.download_from_wandb:
-            wandb_restore_mdp_params(mdp_config)
+#     if mdp_config.wrapperArgs.download_from_wandb:
+#             wandb_restore_mdp_params(mdp_config)
             
-    if build:
-        mdp_config.mdpBuildArgs.rebuild_mdpfcache = False
-        mdp_config.mdpBuildArgs.save_mdp2cache = True
-    else:
-        mdp_config.mdpBuildArgs.rebuild_mdpfcache = True
-        mdp_config.mdpBuildArgs.save_mdp2cache = False
+#     if build:
+#         mdp_config.mdpBuildArgs.rebuild_mdpfcache = False
+#         mdp_config.mdpBuildArgs.save_mdp2cache = True
+#     else:
+#         mdp_config.mdpBuildArgs.rebuild_mdpfcache = True
+#         mdp_config.mdpBuildArgs.save_mdp2cache = False
     
 
-    # Main Logic
-    train_buffer = get_buffer(env, mdp_config, dataset, repr_model.predict_action_single)
+#     # Main Logic
+#     train_buffer = get_buffer(env, mdp_config, dataset, repr_model.predict_action_single)
     
-    tt_action_space = get_tran_types(mdp_config.mdpBuildArgs.tran_type_count)
+#     tt_action_space = get_tran_types(mdp_config.mdpBuildArgs.tran_type_count)
 
-    if factored_mdp:
-        empty_MDP = FullMDPFactored(A=tt_action_space,
-                        build_args=mdp_config.mdpBuildArgs,
-                        solve_args=mdp_config.mdpSolveArgs)
-    else:
-        empty_MDP = FullMDP(A=tt_action_space,
-                        build_args=mdp_config.mdpBuildArgs,
-                        solve_args=mdp_config.mdpSolveArgs)
+#     if factored_mdp:
+#         empty_MDP = FullMDPFactored(A=tt_action_space,
+#                         build_args=mdp_config.mdpBuildArgs,
+#                         solve_args=mdp_config.mdpSolveArgs)
+#     else:
+#         empty_MDP = FullMDP(A=tt_action_space,
+#                         build_args=mdp_config.mdpBuildArgs,
+#                         solve_args=mdp_config.mdpSolveArgs)
     
 
-    myAgent = agent_model_class(seed_mdp=empty_MDP,
-                         repr_model=repr_model,
-                        build_args=mdp_config.mdpBuildArgs,
-                            solve_args=mdp_config.mdpSolveArgs,
-                             eval_args=mdp_config.evalArgs,
-                            action_space=env.action_space,).verbose()
+#     myAgent = agent_model_class(seed_mdp=empty_MDP,
+#                          repr_model=repr_model,
+#                         build_args=mdp_config.mdpBuildArgs,
+#                             solve_args=mdp_config.mdpSolveArgs,
+#                              eval_args=mdp_config.evalArgs,
+#                             action_space=env.action_space,).verbose()
         
-    myAgent.process(train_buffer, match_hash=False)
+#     myAgent.process(train_buffer, match_hash=False)
 
     
-    return myAgent
+#     return myAgent
 
 
 def wandb_restore_mdp_params(config):
@@ -179,45 +180,53 @@ def wandb_save_mdp_params(config):
 
     
     
-def get_agent_model_class(agent_class):
-    if agent_class == "DeterministicAgent": return DACAgentBase;
-    elif agent_class == "DeterministicAgent_o": return DACAgentBase;
-    elif agent_class == "DeterministicAgent_s": return DACAgentBase;
-    elif agent_class == "StochasticAgent": return DACAgent;
-    elif agent_class == "StochasticAgent_o": return DACAgent;
-    elif agent_class == "StochasticAgent_s": return DACAgent;
-    elif agent_class == "StochasticAgent_sa": return DACAgentSARepr;
-    elif agent_class == "StochasticAgentWithDelta_o": return DACAgentDelta;
-    elif agent_class == "StochasticAgentWithDelta_s": return DACAgentDelta;
-    elif agent_class == "StochasticAgentWithParametricPredFxn_o": return DACAgentThetaDynamics;
-    elif agent_class == "StochasticAgentWithParametricPredFxn_s": return DACAgentThetaDynamics;
-    elif agent_class == "StchExtendedAgent_o": return DACAgentThetaDynamicsPlusPi;
-    elif agent_class == "StchExtendedAgent_s": return DACAgentThetaDynamicsPlusPi;
-    elif agent_class == "StchExtendedAgentSafeBase_o":return DACAgentThetaDynamicsPlusPiWithOODEval;
-    elif agent_class == "StchExtendedAgentSafeBase_s":return DACAgentThetaDynamicsPlusPiWithOODEval;
-    elif agent_class == "PIAgent_o" : return DACAgentThetaDynamicsBiasPi;
-    elif agent_class == "PIAgent_s" : return DACAgentThetaDynamicsBiasPi;
+def get_agent_model_class(config, dac_build):
+    """
+    Holds the map of dac_build and dac agent class. 
+    Returns the correct DACMDP Agent Class 
+    input: config - current context and arguments. 
+    input: dac_build - name of the dac build for the dac agent class.  
+    """
+    if dac_build == "DACAgentBase": return DACAgentBase;
+    elif dac_build == "DACAgentCont": return DACAgentCont;
+#     elif dac_build == "DeterministicAgent_s": return DACAgentBase;
+#     elif dac_build == "StochasticAgent": return DACAgent;
+#     elif dac_build == "StochasticAgent_o": return DACAgent;
+#     elif dac_build == "StochasticAgent_s": return DACAgent;
+#     elif dac_build == "StochasticAgent_sa": return DACAgentSARepr;
+#     elif dac_build == "StochasticAgentWithDelta_o": return DACAgentDelta;
+#     elif dac_build == "StochasticAgentWithDelta_s": return DACAgentDelta;
+#     elif dac_build == "StochasticAgentWithParametricPredFxn_o": return DACAgentThetaDynamics;
+#     elif dac_build == "StochasticAgentWithParametricPredFxn_s": return DACAgentThetaDynamics;
+#     elif dac_build == "StchExtendedAgent_o": return DACAgentThetaDynamicsPlusPi;
+#     elif dac_build == "StchExtendedAgent_s": return DACAgentThetaDynamicsPlusPi;
+#     elif dac_build == "StchExtendedAgentSafeBase_o":return DACAgentThetaDynamicsPlusPiWithOODEval;
+#     elif dac_build == "StchExtendedAgentSafeBase_s":return DACAgentThetaDynamicsPlusPiWithOODEval;
+#     elif dac_build == "PIAgent_o" : return DACAgentThetaDynamicsBiasPi;
+#     elif dac_build == "PIAgent_s" : return DACAgentThetaDynamicsBiasPi;
     else: assert False, "Agent Model Not Found"
     
-def get_repr_model(agent_class, config, dynamics_model = None, policy_model = None):
-    if agent_class == "DeterministicAgent": return DummyNet();
-    elif agent_class == "DeterministicAgent_o": return DummyNet();
-    elif agent_class == "DeterministicAgent_s": return LatentDynamicsNet(dynamics_model, config.dataArgs.buffer_device);
-    elif agent_class == "StochasticAgent": return DummyNet();
-    elif agent_class == "StochasticAgent_o": return DummyNet();
-    elif agent_class == "StochasticAgent_s": return LatentDynamicsNet(dynamics_model, config.dataArgs.buffer_device);
-    elif agent_class == "StochasticAgent_sa": return LatentDynamicsNet(dynamics_model, config.dataArgs.buffer_device);
-    elif agent_class == "StochasticAgentWithDelta_o": return DummyNet();
-    elif agent_class == "StochasticAgentWithDelta_s": return LatentDynamicsNet(dynamics_model, config.dataArgs.buffer_device);
-    elif agent_class == "StochasticAgentWithParametricPredFxn_o": return LatentPolicyNetObs(dynamics_model, policy_model, config.dataArgs.buffer_device);
-    elif agent_class == "StochasticAgentWithParametricPredFxn_s": return LatentPolicyNetState(dynamics_model, policy_model, config.dataArgs.buffer_device);
-    elif agent_class == "StchExtendedAgent_o": return LatentPolicyNetObs(dynamics_model, policy_model, config.dataArgs.buffer_device);
-    elif agent_class == "StchExtendedAgent_s": return LatentPolicyNetState(dynamics_model, policy_model, config.dataArgs.buffer_device);
-    elif agent_class == "StchExtendedAgentSafeBase_o":return LatentPolicyNetObs(dynamics_model, policy_model, config.dataArgs.buffer_device);
-    elif agent_class == "StchExtendedAgentSafeBase_s":return LatentPolicyNetState(dynamics_model, policy_model, config.dataArgs.buffer_device);
-    elif agent_class == "PIAgent_o" : return LatentPolicyNetObs(dynamics_model, policy_model, config.dataArgs.buffer_device);
-    elif agent_class == "PIAgent_s" : return LatentPolicyNetState(dynamics_model, policy_model, config.dataArgs.buffer_device);
-    else: assert False, "Agent Class Not Found"
+def get_repr_model(config, repr_build):
+    if repr_build == "identity": return DummyNet();
+#     elif repr_build == "DeterministicAgent_o": return DummyNet();
+#     elif repr_build == "DeterministicAgent_s": return LatentDynamicsNet(config.reprArgs.dynamics_model, config.dataArgs.buffer_device);
+#     elif repr_build == "StochasticAgent": return DummyNet();
+#     elif repr_build == "StochasticAgent_o": return DummyNet();
+#     elif repr_build == "StochasticAgent_s": return LatentDynamicsNet(config.reprArgs.dynamics_model, config.dataArgs.buffer_device);
+#     elif repr_build == "StochasticAgent_sa": return LatentDynamicsNet(config.reprArgs.dynamics_model, config.dataArgs.buffer_device);
+#     elif repr_build == "StochasticAgentWithDelta_o": return DummyNet();
+#     elif repr_build == "StochasticAgentWithDelta_s": return LatentDynamicsNet(config.reprArgs.dynamics_model, config.dataArgs.buffer_device);
+#     elif repr_build == "StochasticAgentWithParametricPredFxn_o": return LatentPolicyNetObs(config.reprArgs.dynamics_model, config.reprArgs.policy_model, config.dataArgs.buffer_device);
+#     elif repr_build == "StochasticAgentWithParametricPredFxn_s": return LatentPolicyNetState(config.reprArgs.dynamics_model, config.reprArgs.policy_model, config.dataArgs.buffer_device);
+#     elif repr_build == "StchExtendedAgent_o": return LatentPolicyNetObs(config.reprArgs.dynamics_model, config.reprArgs.policy_model, config.dataArgs.buffer_device);
+#     elif repr_build == "StchExtendedAgent_s": return LatentPolicyNetState(config.reprArgs.dynamics_model, config.reprArgs.policy_model, config.dataArgs.buffer_device);
+#     elif repr_build == "StchExtendedAgentSafeBase_o":return LatentPolicyNetObs(config.reprArgs.dynamics_model, config.reprArgs.policy_model, config.dataArgs.buffer_device);
+#     elif repr_build == "StchExtendedAgentSafeBase_s":return LatentPolicyNetState(config.reprArgs.dynamics_model, config.reprArgs.policy_model, config.dataArgs.buffer_device);
+#     elif repr_build == "PIAgent_o" : return LatentPolicyNetObs(config.reprArgs.dynamics_model, config.reprArgs.policy_model, config.dataArgs.buffer_device);
+#     elif repr_build == "PIAgent_s" : return LatentPolicyNetState(config.reprArgs.dynamics_model, config.reprArgs.policy_model, config.dataArgs.buffer_device);
+    else: 
+        print("Agent Class Not Found","returning dummy representation")
+        return DummyNet();
 
 
 
