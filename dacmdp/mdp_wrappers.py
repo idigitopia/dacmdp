@@ -6,7 +6,7 @@ import torch
 import wandb
 from .core.args import BaseConfig as MDPBaseConfig
 from .core.mdp_agents.disc_agent import DACAgentBase 
-from .core.mdp_agents.cont_agent import DACAgentCont, DACAgentDelta,  DACAgentThetaDynamics, DACAgentSARepr
+from .core.mdp_agents.cont_agent import DACAgentContNNBaseline, DACAgentContNNBDeltaPred,  DACAgentThetaDynamics, DACAgentContNNBSARepr
 from .core.mdp_agents.pi_agent import DACAgentThetaDynamicsBiasPi, DACAgentThetaDynamicsPlusPi,  DACAgentThetaDynamicsPlusPiWithOODEval
 from .core.repr_nets import DummyNet, LatentDynamicsNet, LatentPolicyNetObs, LatentPolicyNetState
 
@@ -188,8 +188,8 @@ def get_agent_model_class(config, dac_build):
     input: dac_build - name of the dac build for the dac agent class.  
     """
     if dac_build == "DACAgentBase": return DACAgentBase;
-    elif dac_build == "DACAgentCont": return DACAgentCont;
-#     elif dac_build == "DeterministicAgent_s": return DACAgentBase;
+    elif dac_build == "DACAgentContNNBaseline": return DACAgentContNNBaseline;
+    elif dac_build == "DACAgentContNNBDeltaPred": return DACAgentContNNBDeltaPred;
 #     elif dac_build == "StochasticAgent": return DACAgent;
 #     elif dac_build == "StochasticAgent_o": return DACAgent;
 #     elif dac_build == "StochasticAgent_s": return DACAgent;

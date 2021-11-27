@@ -33,7 +33,7 @@ from .disc_agent import DACAgentBase
 
         
 
-class DACAgentCont(DACAgentBase):
+class DACAgentContNNBaseline(DACAgentBase):
     """
     NN version Baseline for Continuous Actions. 
     get_candidate_actions : queries the action of the nearest neighbors.
@@ -53,7 +53,7 @@ class DACAgentCont(DACAgentBase):
         
         # tran type name indexing variables.
         self.tt2i, self.i2tt = {tt:i for i,tt in enumerate(self.tran_types)}, {i:tt for i,tt in enumerate(self.tran_types)}
-      
+
         # Dictionary filter functions
         self.items4tt = lambda d: list(d.items())[:self.build_args.tran_type_count]
         self.keys4tt = lambda d: list(d.keys())[:self.build_args.tran_type_count]
@@ -213,7 +213,7 @@ class DACAgentCont(DACAgentBase):
 
 
 
-class DACAgentDelta(DACAgentCont):
+class DACAgentContNNBDeltaPred(DACAgentContNNBaseline):
     """
     NN version Baseline for Continuous Actions. 
     get_candidate_actions : queries the action of the nearest neighbors.
@@ -246,7 +246,7 @@ class DACAgentDelta(DACAgentCont):
         return np.array(parsed_s_candidate_rewards).astype(np.float32)
 
 
-class DACAgentThetaDynamics(DACAgentCont):
+class DACAgentThetaDynamics(DACAgentContNNBaseline):
     """
     DAC Agent with Parametric prediction Function. as Dynamics model.
     """
@@ -295,7 +295,7 @@ class DACAgentThetaDynamics(DACAgentCont):
         return np.array(parsed_s_candidate_rewards).astype(np.float32).reshape((len(self.parsed_states),self.build_args.tran_type_count))
 
 
-class DACAgentSARepr(DACAgentCont):
+class DACAgentContNNBSARepr(DACAgentContNNBaseline):
     """
     DAC Agent with Parametric prediction Function. as Dynamics model.
     """
