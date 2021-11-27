@@ -30,6 +30,23 @@ class DummyNet():
     def predict_reward_batch(self, s_batch, a_batch):
         assert False, "Not Implemented Error"
 
+
+class TD3ReprNet(DummyNet):
+    def __init__(self, actor, critic, device, *args, **kwargs):
+        super().__init__(*args,**kwargs)
+        
+        self.actor = actor.to(device)
+        self.critic = critic.to(device)
+        self.device = device
+
+    def encode_state_action_batch(self, s_batch, a_batch):
+        s_batch = (s_batch if torch.is_tensor(s_batch) else torch.FloatTensor(s_batch)).to(self.device)
+        a_batch = (a_batch if torch.is_tensor(a_batch) else torch.FloatTensor(a_batch)).to(self.device)
+        sa_repr_batch =  self.critic.encode(s_batch, a_batch).detach().cpu().numpy().astype(np.float32)
+
+        return [tuple(z) for z in sa_repr_batch]
+
+
 class LatentDynamicsNet(DummyNet):
     def __init__(self, dynamics_model, device, *args, **kwargs):
         super().__init__(*args,**kwargs)

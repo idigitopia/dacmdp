@@ -19,41 +19,79 @@ from sklearn.neighbors import KDTree as RawKDTree
 import pickle as pk
 import numpy as np
 from gym.spaces.discrete import Discrete
+from sklearn.cluster import KMeans
 
 
 # Project Specific Dependencies 
 from lmdp.data.buffer import get_iter_indexes, iter_batch
 from lmdp.mdp.MDP_GPU import init2zero, init2list, init2dict
 from lmdp.mdp.MDP_GPU import init2zero_def_dict, init2zero_def_def_dict
-from .disc_agent import dict_hash, v_iter, has_attributes, MyKDTree
+from .disc_agent import dict_hash, v_iter, has_attributes, MyKDTree 
 from .disc_agent import reward_logic, cost_logic, kernel_probs, get_one_hot_list, sample_random_action_gym
 from .disc_agent import DACAgentBase
 
 
-# DAC Agent
+        
+
 class DACAgentCont(DACAgentBase):
+    """
+    NN version Baseline for Continuous Actions. 
+    get_candidate_actions : queries the action of the nearest neighbors.
+    get_candidate_actions_dist : outputs the distance to the nearest neighbor for the corresponding action. 
+    get_candidate_predictions : for the given candidate action, prediction is the seen next state for that particular action.
+    get_candidate_rewards: for the given candidate action, predicted reward is the seen reward for the corresponding nn transition.
+    """
     def __init__(self,*args,**kwargs):
         super().__init__(*args,**kwargs)
+
+        self.action_len = self.action_space.shape[0]
+        self.action_vec_size = self.action_space.shape[0]
+
+        # Name of tran types. 
+        self.tran_types = get_one_hot_list(self.build_args.tran_type_count)
+        print("updated tran_types and indexing")
         
+        # tran type name indexing variables.
+        self.tt2i, self.i2tt = {tt:i for i,tt in enumerate(self.tran_types)}, {i:tt for i,tt in enumerate(self.tran_types)}
+      
+        # Dictionary filter functions
         self.items4tt = lambda d: list(d.items())[:self.build_args.tran_type_count]
         self.keys4tt = lambda d: list(d.keys())[:self.build_args.tran_type_count]
         self.items4build_k = lambda d: list(d.items())[:self.build_args.mdp_build_k]
         self.keys4build_k = lambda d: list(d.keys())[:self.build_args.mdp_build_k]
         
-        self.end_state_vector = None
+        # Step 2
+    # Build KD Tree for parsed states. 
+    def build_kdtree(self):
+        """Builds KD tree on the states included in the parsed transitions"""
+        assert self.parsed_transitions, "Empty Parsed Transitions"
+        
+        st = time.time()
+
+        self.v_print("Building State KD Tree")
+        # Compile a list of unique states parsed and add a end_state marker. 
+        parsed_unique_states = np.unique(np.stack([s for s,_,_,_,_ in self.parsed_transitions] + [self.end_state_vector]),axis=0)
+        # Build a KD Tree using the parsed States.
+        self.s_kdTree = MyKDTree(parsed_unique_states)
+        
+        self.v_print("Building Action KD Tree")
+        # Compile a list of unique actions parsed. 
+        self.parsed_unique_actions = np.unique(np.stack([a for s,a,_,_,_ in self.parsed_transitions]),axis=0)
+        # Build a KD Tree using the parsed actions.
+        self.a_kdTree = MyKDTree(self.parsed_unique_actions)
+        
+        self.v_print("kDTree built:  Complete,  Time Elapsed: {}\n\n".format(time.time() - st))
+
 
     # Main Functions | Override to change the nature of the MDP
     def get_candidate_actions(self, parsed_states):
-        """ 
-        return candidate actiosn for all parsed_states  | numpy array with shape  [state_count, action_count, action_vec_size]
-        """
+        """ return candidate actiosn for all parsed_states  | numpy array with shape  [state_count, action_count, action_vec_size]"""
         self.v_print("Getting Candidate Actions [Start]"); st = time.time()
         
         parsed_s_candidate_actions = [[self._query_action_from_D(nn_s) for nn_s,d in self.items4tt(knn_dict)]
                                       for knn_dict in self.parsed_s_nn_dicts]
         
         self.v_print("Getting Candidate Actions [Complete],  Time Elapsed: {} \n".format(time.time() - st))
-
         return np.array(parsed_s_candidate_actions).astype(np.float32)
         
     def get_candidate_actions_dist(self, parsed_states, candidate_actions):
@@ -128,7 +166,7 @@ class DACAgentCont(DACAgentBase):
             [np.array(v) for v in list(zip(*self.parsed_transitions))]
         self.parsed_s_nn_dicts = self.s_kdTree.get_knn_sub_batch(self.parsed_states, nn_k,
                                                                  batch_size = 256, verbose = self.verbose, 
-                                                                 message= "NN for all parsed states")
+                                                                 message= "Calculating NN for all parsed states")
         
         # candidate actions and predictions
         self.parsed_s_candidate_actions = self.get_candidate_actions(self.parsed_states) #  [state_count, action_count, action_vec_size] 
@@ -176,9 +214,15 @@ class DACAgentCont(DACAgentBase):
 
 
 class DACAgentDelta(DACAgentCont):
+    """
+    NN version Baseline for Continuous Actions. 
+    get_candidate_actions : queries the action of the nearest neighbors.
+    get_candidate_actions_dist : outputs the distance to the nearest neighbor for the corresponding action. 
+    get_candidate_predictions : for the given candidate action, prediction is the seen next state for that particular action.
+    """
+
     def __init__(self,*args,**kwargs):
-        super().__init__(*args,**kwargs)
-        
+        super().__init__(*args,**kwargs)   
 
     # Main Functions | Override to change the nature of the MDP
     def get_candidate_predictions(self, parsed_states, candidate_actions):
