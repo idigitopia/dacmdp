@@ -32,7 +32,7 @@ from dacmdp.exp_track.experiments import ExpPool
 from dacmdp.core.repr_nets import DummyNet
 from dacmdp.core.mdp_agents.disc_agent import DACAgentBase, CustomActionSpace, get_action_list_from_space
 from dacmdp.mdp_wrappers import get_agent_model_class, get_repr_model
-from buffer_helper import collect_buffer, load_buffer
+from utils_buffer import collect_buffer, load_buffer
 
 # Data Dependencies
 import d4rl 

@@ -1,6 +1,123 @@
 from .cont_agent import *
 
 
+class DACAgentSADynamicsPlcySw8(DACAgentContBase):
+    """
+    This class extends the DACAgentContBase such that it can perform policy switching. 
+    a list of repr_model shall be passed one of which will be selected for state representation. 
+    the candidate actions will be selected from each of the provided repr_model.| repr model will also have a policy embedded inside it. 
+    the candidate Dynamics will be approximated using the SA representation given by the same selected repr_model. 
+        - The target state will be approximated by the next_state of the nn transition.
+        - This means that get_candidate_predictions and get_candidate_predictions_knn_dicts may be combined here. 
+    the candidate rewards will be approximated using the SA representation given by the same selected repr_model. 
+        - The reward will be approximated by the reward of the nn transition. 
+     
+
+    """
+    
+    def __init__(self,*args,**kwargs):
+        super().__init__(*args,**kwargs)
+
+        # Assert that a list of repr_models are provided. 
+
+        # Assert that each of the repr_model has action selection method implemented.
+
+
+        # Main Functions | Override to change the nature of the MDP
+    def get_candidate_actions(self, parsed_states):
+        raise NotImplementedError ("Subclasses should implement")
+        """ return candidate actiosn for all parsed_states  | numpy array with shape  [state_count, action_count, action_vec_size]"""
+        self.v_print("Getting Candidate Actions [Start]"); st = time.time()
+
+        parsed_s_candidate_actions = []
+
+        batch_iterator = v_iter(iter_batch(range(len(self.cache_buffer)), _batch_size), 
+                                          self._verbose,
+                                          "Getting Candidate Actions from observations")
+
+        # Populate self.parsed_transitions
+        for idxs in batch_iterator:
+            o_batch, _, _, _, _ = self.cache_buffer.sample_indices(idxs)
+            parsed_s_candidate_actions.extend(self.repr_model.sample_action_batch(batch_ob))
+
+        self.v_print("Getting Candidate Actions [Complete],  Time Elapsed: {} \n".format(time.time() - st))
+
+        return np.array(parsed_s_candidate_actions).astype(np.float32)
+
+    # for sa repreesntation only 
+    def get_candidate_predictions(self, parsed_states, candidate_actions):
+        """ return the predictions for all candidate actions | numpy array with shape  [state_count, action_count, state_vec_size] """
+        raise NotImplementedError ("Subclasses should implement")
+        # self.v_print("Getting predictions for given Candidate Actions"); st = time.time()
+        # parsed_s_candidate_predictions = [[self._query_ns_from_D(nn_s)  for nn_s,d in self.items4tt(knn_dict)]
+        #         for knn_dict in self.parsed_s_nn_dicts]
+
+        # self.v_print("Getting predictions for given Candidate Actions [Complete],  Time Elapsed: {} \n\n".format(time.time() - st))
+        # return np.array(parsed_s_candidate_predictions).astype(np.float32)
+
+       
+    def get_candidate_predictions_knn_dicts(self, parsed_s_candidate_predictions):
+        raise NotImplementedError ("Subclasses should implement")
+        # return self.s_kdTree.get_knn_sub_batch(parsed_s_candidate_predictions.reshape(-1, self.state_vec_size),
+        #                                 self.build_args.mdp_build_k,
+        #                                 batch_size=256, verbose=self.verbose,
+        #                                 message="Calculating NN for all predicted states.")
+
+
+    def get_candidate_rewards(self, parsed_states, candidate_actions):
+        """ return the predictions for all candidate actions | numpy array with shape  [state_count, action_count] """
+        
+        raise NotImplementedError ("Subclasses should implement")
+
+        # parsed_s_candidate_rewards = [[self._query_r_from_D(nn_s)  for nn_s,d in self.items4tt(knn_dict)]
+        #         for knn_dict in self.parsed_s_nn_dicts]
+        # return np.av_printrray(parsed_s_candidate_rewards).astype(np.float32)
+
+
+    def get_candidate_actions_dist(self, parsed_states, candidate_actions):
+        """ return dists of all candidate actions  | numpy array with shape [state_count, action_count]"""
+        raise NotImplementedError ("Subclasses should implement")
+        self.v_print("Getting Candidate Action Distances"); st = time.time()
+        
+        parsed_s_candidate_action_dists = [] 
+        candidate_actions = np.array(candidate_actions)
+
+        batch_iterator = v_iter(iter_batch(range(len(self.cache_buffer)), _batch_size), 
+                                          self._verbose,
+                                          "Getting Candidate Actions from observations")
+
+        # Make a uncertainty Estimating Model 
+        # - Get obs action embedding for seen actions 
+        # - for caclulating uncertainty on prediction of each candidate action. 
+
+        # Parse observation and candidate actions so that we can query the uncertainty model. 
+        # - Might be just concatenation for true uncertainty model. 
+        # - for now this will be the observation candidate action representation. 
+
+
+        # Query for the uncertainty. 
+        # - find the distance to nearest state action pair for each 
+
+        # use the action embedding  of seen actioons 
+        # to calculating the distance to candidate action. 
+        # distance is the proxy to the uncertainty attached with each predciction. 
+
+        # Return the distance. 
+
+        # Populate self.parsed_transitions
+        for idxs in batch_iterator:
+            o_batch, _, _, _, _ = self.cache_buffer.sample_indices(idxs)
+            cand_a_batch = candidate_actions[idxs]
+            for a in cand_a_batch: 
+                parsed_s_candidate_actions.extend(self.repr_model.sample_action_batch(batch_ob))
+
+
+        self.v_print("Getting Candidate Action Distances [Complete],  Time Elapsed: {} \n".format(time.time() - st))
+        return np.array(parsed_s_candidate_action_dists).astype(np.float32)
+
+
+
+
 class DACAgentThetaDynamicsPlusPi(DACAgentThetaDynamics):
     def __init__(self,*args,**kwargs):
         super().__init__(*args,**kwargs)

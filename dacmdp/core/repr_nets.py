@@ -20,6 +20,9 @@ class DummyNet():
 
     def predict_action_batch(self, o_batch):
         assert False, "Not Implemented Error"
+
+    def sample_action_batch(self, o_batch):
+        assert False, "Not Implemented Error"
         
     def predict_next_state_batch(self, s_batch, a_batch):
         assert False, "Not Implemented Error"

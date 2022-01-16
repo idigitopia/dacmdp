@@ -27,20 +27,20 @@ from lmdp.data.buffer import get_iter_indexes, iter_batch
 from lmdp.mdp.MDP_GPU import init2zero, init2list, init2dict
 from lmdp.mdp.MDP_GPU import init2zero_def_dict, init2zero_def_def_dict
 from .disc_agent import dict_hash, v_iter, has_attributes, MyKDTree 
-from .disc_agent import reward_logic, cost_logic, kernel_probs, get_one_hot_list, sample_random_action_gym
+from .disc_agent import discount_reward, cost_logic, get_one_hot_list, sample_random_action_gym
 from .disc_agent import DACAgentBase
 
 
-        
 
-class DACAgentContNNBaseline(DACAgentBase):
+class DACAgentContBase(DACAgentBase):
     """
-    NN version Baseline for Continuous Actions. 
+    DAC Agent Base for Continuous Actions. 
     get_candidate_actions : queries the action of the nearest neighbors.
     get_candidate_actions_dist : outputs the distance to the nearest neighbor for the corresponding action. 
     get_candidate_predictions : for the given candidate action, prediction is the seen next state for that particular action.
     get_candidate_rewards: for the given candidate action, predicted reward is the seen reward for the corresponding nn transition.
     """
+
     def __init__(self,*args,**kwargs):
         super().__init__(*args,**kwargs)
 
@@ -54,13 +54,17 @@ class DACAgentContNNBaseline(DACAgentBase):
         # tran type name indexing variables.
         self.tt2i, self.i2tt = {tt:i for i,tt in enumerate(self.tran_types)}, {i:tt for i,tt in enumerate(self.tran_types)}
 
+        # KD Tree variables. 
+        self.s_kdTree = None
+        self.a_kdTree = None
+
         # Dictionary filter functions
         self.items4tt = lambda d: list(d.items())[:self.build_args.tran_type_count]
         self.keys4tt = lambda d: list(d.keys())[:self.build_args.tran_type_count]
         self.items4build_k = lambda d: list(d.items())[:self.build_args.mdp_build_k]
         self.keys4build_k = lambda d: list(d.keys())[:self.build_args.mdp_build_k]
-        
-        # Step 2
+
+
     # Build KD Tree for parsed states. 
     def build_kdtree(self):
         """Builds KD tree on the states included in the parsed transitions"""
@@ -82,6 +86,150 @@ class DACAgentContNNBaseline(DACAgentBase):
         
         self.v_print("kDTree built:  Complete,  Time Elapsed: {}\n\n".format(time.time() - st))
 
+
+    # Main Functions | Override to change the nature of the MDP
+    def get_candidate_actions(self, parsed_states):
+        raise NotImplementedError ("Subclasses should implement")
+        """ return candidate actiosn for all parsed_states  | numpy array with shape  [state_count, action_count, action_vec_size]"""
+        # self.v_print("Getting Candidate Actions [Start]"); st = time.time()
+        
+        # parsed_s_candidate_actions = [[self._query_action_from_D(nn_s) for nn_s,d in self.items4tt(knn_dict)]
+        #                               for knn_dict in self.parsed_s_nn_dicts]
+        
+        # self.v_print("Getting Candidate Actions [Complete],  Time Elapsed: {} \n".format(time.time() - st))
+        # return np.array(parsed_s_candidate_actions).astype(np.float32)
+        
+    def get_candidate_actions_dist(self, parsed_states, candidate_actions):
+        """ return dists of all candidate actions  | numpy array with shape [state_count, action_count]"""
+        raise NotImplementedError ("Subclasses should implement")
+        # self.v_print("Getting Candidate Action Distances"); st = time.time()
+        
+        # parsed_s_candidate_action_dists = [[d for nn_s,d in self.items4tt(knn_dict)]  
+        #                                    for knn_dict in self.parsed_s_nn_dicts]
+
+        # self.v_print("Getting Candidate Action Distances [Complete],  Time Elapsed: {} \n".format(time.time() - st))
+        # return np.array(parsed_s_candidate_action_dists).astype(np.float32)
+        
+    def get_candidate_predictions(self, parsed_states, candidate_actions):
+        """ return the predictions for all candidate actions | numpy array with shape  [state_count, action_count, state_vec_size] """
+        raise NotImplementedError ("Subclasses should implement")
+        # self.v_print("Getting predictions for given Candidate Actions"); st = time.time()
+        # parsed_s_candidate_predictions = [[self._query_ns_from_D(nn_s)  for nn_s,d in self.items4tt(knn_dict)]
+        #         for knn_dict in self.parsed_s_nn_dicts]
+
+        # self.v_print("Getting predictions for given Candidate Actions [Complete],  Time Elapsed: {} \n\n".format(time.time() - st))
+        # return np.array(parsed_s_candidate_predictions).astype(np.float32)
+
+    def get_candidate_predictions_knn_dicts(self, parsed_s_candidate_predictions):
+        raise NotImplementedError ("Subclasses should implement")
+        # return self.s_kdTree.get_knn_sub_batch(parsed_s_candidate_predictions.reshape(-1, self.state_vec_size),
+        #                                 self.build_args.mdp_build_k,
+        #                                 batch_size=256, verbose=self.verbose,
+        #                                 message="Calculating NN for all predicted states.")
+
+    def get_candidate_rewards(self, parsed_states, candidate_actions):
+        """ return the predictions for all candidate actions | numpy array with shape  [state_count, action_count] """
+        
+        raise NotImplementedError ("Subclasses should implement")
+
+        # parsed_s_candidate_rewards = [[self._query_r_from_D(nn_s)  for nn_s,d in self.items4tt(knn_dict)]
+        #         for knn_dict in self.parsed_s_nn_dicts]
+        # return np.av_printrray(parsed_s_candidate_rewards).astype(np.float32)
+        
+    # Step 3
+    def intialize_dac_dynamics(self):
+        """ Populates tC and rC based on the parsed transitions """
+        
+        # HouseKeeping
+        self.v_print(f"----  Initializing Stochastic Dynamics  NS Count {self.build_args.MAX_NS_COUNT}----"); st = time.time()
+        self.v_print("Step 3 [Populate Dynamics]: Running"); st = time.time()
+        
+        if self.build_args.mdp_build_k != self.build_args.MAX_NS_COUNT:
+            print("Warning Number of available ns slots and mdp build k is not the same. behavior is undefined")
+        
+        # Declare and Initialize helper variables
+        self.stt2a_idx_matrix = np.zeros((len(self.s_kdTree.s2i), self.build_args.tran_type_count)).astype(np.int32)
+        self.orig_tD, self.orig_rD = defaultdict(init2zero_def_dict), defaultdict(init2zero_def_dict)
+        self.tC = defaultdict(init2zero_def_def_dict)
+        self.rC = defaultdict(init2zero_def_def_dict)
+        self.cC = defaultdict(init2zero_def_def_dict)
+        
+        # seed for end_state transitions
+        for tt in self.tran_types:
+            self.tC[self.end_state_vector][tt][self.end_state_vector] = 1
+            self.rC[self.end_state_vector][tt][self.end_state_vector] = 0
+            self.cC[self.end_state_vector][tt][self.end_state_vector] = 0
+            
+        # activates _query_action_from_D, and _query_ns_from_D
+        for s, a, ns, r, d in self.parsed_transitions:
+            self.orig_tD[s][a] = ns if not d else self.end_state_vector
+            self.orig_rD[s][a] = r 
+
+        
+        # calculate k for nearest neighbor lookups and helper functions
+        nn_k = max(self.build_args.tran_type_count, self.build_args.mdp_build_k)
+        
+        # New NN variables
+        self.parsed_states, self.parsed_actions,  self.parsed_next_states, self.parsed_rewards, self.parsed_terminals = \
+            [np.array(v) for v in list(zip(*self.parsed_transitions))]
+        self.parsed_s_nn_dicts = self.s_kdTree.get_knn_sub_batch(self.parsed_states, nn_k,
+                                                                 batch_size = 256, verbose = self.verbose, 
+                                                                 message= "Calculating NN for all parsed states")
+        
+        # candidate actions and predictions
+        self.parsed_s_candidate_actions = self.get_candidate_actions(self.parsed_states) #  [state_count, action_count, action_vec_size] 
+        self.parsed_s_candidate_predictions = self.get_candidate_predictions(self.parsed_states, self.parsed_s_candidate_actions) #  [state_count, action_count, state_vec_size]
+        self.parsed_s_candidate_predictions_knn_dicts = self.get_candidate_predictions_knn_dicts(self.parsed_s_candidate_predictions)
+        self.parsed_s_candidate_action_dists = self.get_candidate_actions_dist(self.parsed_states, self.parsed_s_candidate_actions) # [state_count, action_count]
+        self.parsed_s_candidate_rewards = self.get_candidate_rewards(self.parsed_states, self.parsed_s_candidate_actions)
+
+        # Sanity Check
+        assert len(self.parsed_s_candidate_actions[0]) == self.build_args.tran_type_count
+        assert len(self.parsed_s_candidate_predictions[0]) == self.build_args.tran_type_count
+        assert len(self.parsed_s_candidate_action_dists[0]) == self.build_args.tran_type_count
+        assert len(self.parsed_s_candidate_rewards[0]) == self.build_args.tran_type_count
+
+
+        
+        for s_idx, (s, a, ns, r, d) in v_iter(enumerate(self.parsed_transitions),self._verbose, "Calculating DAC Dynamics"):    
+            candidate_actions = self.parsed_s_candidate_actions[s_idx]
+            candidate_action_dists = self.parsed_s_candidate_action_dists[s_idx]
+            candidate_rewards = self.parsed_s_candidate_rewards[s_idx]
+            
+            for a_idx, (tt, cand_a, cand_d, cand_r) in enumerate(zip(self.tran_types, candidate_actions, candidate_action_dists, candidate_rewards)):
+                
+                # tt to action map 
+                self.stt2a_idx_matrix[self.s_kdTree.s2i[s]][self.tt2i[tt]] = self.a_kdTree.s2i[tuple(cand_a)]
+                
+                preD_ns_idx = s_idx * len(self.tran_types) + a_idx
+                pred_ns_nn_dict = {nn_s: d + cand_d for nn_s,d in self.parsed_s_candidate_predictions_knn_dicts[preD_ns_idx].items()}
+                pred_ns_probs = MyKDTree.calc_prob_distr(pred_ns_nn_dict, delta=self.build_args.knn_delta,
+                                                uniform_distr = self.build_args.normalize_by_distance)
+                    
+                # We are only concerned with transition counts in this phase. 
+                # All transition counts will be properly converted to tran prob while inserting in MDP
+                # Reward can be a function of distance of the nn of the prediction, or can also be accounted for individually. 
+                cand_c = cost_logic(list(pred_ns_nn_dict.values())[0], self.build_args.penalty_beta)
+
+                for dist, (pred_ns, prob) in zip(pred_ns_nn_dict.values(), pred_ns_probs.items()):
+                    # reward discounted by the distance to state used for tt->a mapping. 
+                    self.tC[s][tt][pred_ns] = int(prob*100)
+                    self.rC[s][tt][pred_ns] = cand_r*int(prob*100)
+                    self.cC[s][tt][pred_ns] = cand_c*int(prob*100)
+            
+        self.v_print("Step 3 [Populate Dynamics]: Complete,  Time Elapsed: {} \n\n".format(time.time() - st))
+
+
+class DACAgentContNNBaseline(DACAgentContBase):
+    """
+    NN version Baseline for Continuous Actions. 
+    get_candidate_actions : queries the action of the nearest neighbors.
+    get_candidate_actions_dist : outputs the distance to the nearest neighbor for the corresponding action. 
+    get_candidate_predictions : for the given candidate action, prediction is the seen next state for that particular action.
+    get_candidate_rewards: for the given candidate action, predicted reward is the seen reward for the corresponding nn transition.
+    """
+    def __init__(self,*args,**kwargs):
+        super().__init__(*args,**kwargs)
 
     # Main Functions | Override to change the nature of the MDP
     def get_candidate_actions(self, parsed_states):
@@ -127,90 +275,6 @@ class DACAgentContNNBaseline(DACAgentBase):
         
         self.v_print("Getting reward predictions for given Candidate Actions [Complete],  Time Elapsed: {} \n\n".format(time.time() - st))
         return np.array(parsed_s_candidate_rewards).astype(np.float32)
-    
-    # Step 3
-    def intialize_dac_dynamics(self):
-        """ Populates tC and rC based on the parsed transitions """
-        
-        # HouseKeeping
-        self.v_print(f"----  Initializing Stochastic Dynamics  NS Count {self.build_args.MAX_NS_COUNT}----"); st = time.time()
-        self.v_print("Step 3 [Populate Dynamics]: Running"); st = time.time()
-        
-        if self.build_args.mdp_build_k != self.build_args.MAX_NS_COUNT:
-            print("Warning Number of available ns slots and mdp build k is not the same. behavior is undefined")
-        
-        # Declare and Initialize helper variables
-        self.stt2a_idx_matrix = np.zeros((len(self.s_kdTree.s2i), self.build_args.tran_type_count)).astype(np.int32)
-        self.orig_tD, self.orig_rD = defaultdict(init2zero_def_dict), defaultdict(init2zero_def_dict)
-        self.tC = defaultdict(init2zero_def_def_dict)
-        self.rC = defaultdict(init2zero_def_def_dict)
-        self.cC = defaultdict(init2zero_def_def_dict)
-        
-        # seed for end_state transitions
-        for tt in self.tran_types:
-            self.tC[self.end_state_vector][tt][self.end_state_vector] = 1
-            self.rC[self.end_state_vector][tt][self.end_state_vector] = 0
-            self.cC[self.end_state_vector][tt][self.end_state_vector] = 0
-            
-        # activates _query_action_from_D, and _query_ns_from_D
-        for s, a, ns, r, d in self.parsed_transitions:
-            self.orig_tD[s][a] = ns if not d else self.end_state_vector
-            self.orig_rD[s][a] = r 
-
-        
-        # calculate k for nearest neighbor lookups and helper functions
-        nn_k = max(self.build_args.tran_type_count, self.build_args.mdp_build_k)
-        
-        # New NN variables
-        self.parsed_states, self.parsed_actions,  self.parsed_next_states, self.parsed_rewards, self.parsed_terminals = \
-            [np.array(v) for v in list(zip(*self.parsed_transitions))]
-        self.parsed_s_nn_dicts = self.s_kdTree.get_knn_sub_batch(self.parsed_states, nn_k,
-                                                                 batch_size = 256, verbose = self.verbose, 
-                                                                 message= "Calculating NN for all parsed states")
-        
-        # candidate actions and predictions
-        self.parsed_s_candidate_actions = self.get_candidate_actions(self.parsed_states) #  [state_count, action_count, action_vec_size] 
-        self.parsed_s_candidate_action_dists = self.get_candidate_actions_dist(self.parsed_states, self.parsed_s_candidate_actions) # [state_count, action_count]
-        self.parsed_s_candidate_predictions = self.get_candidate_predictions(self.parsed_states, self.parsed_s_candidate_actions) #  [state_count, action_count, state_vec_size]
-        self.parsed_s_candidate_predictions_knn_dicts = self.get_candidate_predictions_knn_dicts(self.parsed_s_candidate_predictions)
-        self.parsed_s_candidate_rewards = self.get_candidate_rewards(self.parsed_states, self.parsed_s_candidate_actions)
-
-        # Sanity Check
-        assert len(self.parsed_s_candidate_actions[0]) == self.build_args.tran_type_count
-        assert len(self.parsed_s_candidate_predictions[0]) == self.build_args.tran_type_count
-        assert len(self.parsed_s_candidate_action_dists[0]) == self.build_args.tran_type_count
-        assert len(self.parsed_s_candidate_rewards[0]) == self.build_args.tran_type_count
-
-
-        
-        for s_idx, (s, a, ns, r, d) in v_iter(enumerate(self.parsed_transitions),self._verbose, "Calculating DAC Dynamics"):    
-            candidate_actions = self.parsed_s_candidate_actions[s_idx]
-            candidate_action_dists = self.parsed_s_candidate_action_dists[s_idx]
-            candidate_rewards = self.parsed_s_candidate_rewards[s_idx]
-            
-            for a_idx, (tt, cand_a, cand_d, cand_r) in enumerate(zip(self.tran_types, candidate_actions, candidate_action_dists, candidate_rewards)):
-                
-                # tt to action map 
-                self.stt2a_idx_matrix[self.s_kdTree.s2i[s]][self.tt2i[tt]] = self.a_kdTree.s2i[tuple(cand_a)]
-                
-                preD_ns_idx = s_idx * len(self.tran_types) + a_idx
-                pred_ns_nn_dict = {nn_s: d + cand_d for nn_s,d in self.parsed_s_candidate_predictions_knn_dicts[preD_ns_idx].items()}
-                pred_ns_probs = kernel_probs(pred_ns_nn_dict, delta=self.build_args.knn_delta,
-                                                norm_by_dist = self.build_args.normalize_by_distance)
-                    
-                # We are only concerned with transition counts in this phase. 
-                # All transition counts will be properly converted to tran prob while inserting in MDP
-                # Reward can be a function of distance of the nn of the prediction, or can also be accounted for individually. 
-                cand_c = cost_logic(list(pred_ns_nn_dict.values())[0], self.build_args.penalty_beta)
-
-                for dist, (pred_ns, prob) in zip(pred_ns_nn_dict.values(), pred_ns_probs.items()):
-                    # reward discounted by the distance to state used for tt->a mapping. 
-                    self.tC[s][tt][pred_ns] = int(prob*100)
-                    self.rC[s][tt][pred_ns] = cand_r*int(prob*100)
-                    self.cC[s][tt][pred_ns] = cand_c*int(prob*100)
-            
-        self.v_print("Step 3 [Populate Dynamics]: Complete,  Time Elapsed: {} \n\n".format(time.time() - st))
-
 
 
 class DACAgentContNNBDeltaPred(DACAgentContNNBaseline):
@@ -235,7 +299,7 @@ class DACAgentContNNBDeltaPred(DACAgentContNNBaseline):
 
         return np.array(parsed_s_candidate_pred_vectors).astype(np.float32)
 
-        
+
     def get_candidate_rewards(self, parsed_states, candidate_actions):
         """ return the predictions for all candidate actions | numpy array with shape  [state_count, action_count] """
         self.v_print("Getting reward predictions for given Candidate Actions"); st = time.time()
@@ -274,7 +338,6 @@ class DACAgentThetaDynamics(DACAgentContNNBaseline):
         return np.array(parsed_s_candidate_predictions).astype(np.float32).reshape(pred_shape)
             
 
-        
     def get_candidate_rewards(self, parsed_states, candidate_actions):
         """ return the predictions for all candidate actions | numpy array with shape  [state_count, action_count] """
         assert len(parsed_states) == len(candidate_actions)
@@ -359,7 +422,6 @@ class DACAgentContNNBSARepr(DACAgentContNNBaseline):
 
         candidate_predictions_knn_dicts = [{self.parsed_next_states[nn_idx]:dist for nn_idx,dist in knn_dict} for knn_dict in self.candidate_sa_pairs_nn_idxs_dicts]
         return candidate_predictions_knn_dicts
-
 
     def get_candidate_rewards(self, parsed_states, candidate_actions): # Unchanged
         """ return the predictions for all candidate actions | numpy array with shape  [state_count, action_count] """

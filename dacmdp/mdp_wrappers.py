@@ -208,7 +208,7 @@ def get_agent_model_class(config, dac_build):
     
 def get_repr_model(config, repr_build):
     if repr_build == "identity": return DummyNet();
-#     elif repr_build == "DeterministicAgent_o": return DummyNet();
+    elif repr_build == "td3_bc": return DummyNet();
 #     elif repr_build == "DeterministicAgent_s": return LatentDynamicsNet(config.reprArgs.dynamics_model, config.dataArgs.buffer_device);
 #     elif repr_build == "StochasticAgent": return DummyNet();
 #     elif repr_build == "StochasticAgent_o": return DummyNet();

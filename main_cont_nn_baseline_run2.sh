@@ -23,7 +23,8 @@ for env_name in $EnvNames; do
     --tran_type_count ${tran_type_count} --MAX_S_COUNT 110000 --MAX_NS_COUNT ${mdp_build_k} --mdp_build_k ${mdp_build_k} --normalize_by_distance --penalty_beta ${penalty_beta} \
     --gamma 0.99 --plcy_k 1 \
     --repr_build identity --dac_build DACAgentContNNBDeltaPred \
-    --wandb_project cartpoleCont --wandb_entity dacmdp --wandb_id MCNBDP-DD${buffer_name}-TT${tran_type_count}-P${penalty_beta}-K${mdp_build_k}
+    --wandb_project cartpoleCont --wandb_entity dacmdp --wandb_id MCNBDP-DD${buffer_name}-TT${tran_type_count}-P${penalty_beta}-K${mdp_build_k} \
+    --results_folder /nfs/hpc/share/shrestaa/storage/dac_ws/
                 }
                 done
             }

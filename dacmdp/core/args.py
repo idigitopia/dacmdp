@@ -30,10 +30,11 @@ class BaseConfig(object):
         self.logArgs.wandb_id = self.pad_datetime(self.logArgs.exp_id) \
                                 if self.logArgs.wandb_id == "default" else self.logArgs.wandb_id
         root_dir = os.getenv('DACMDP_ROOT_DIR', default='results')
-        self.logArgs.results_folder = path.join(root_dir,self.envArgs.env_name,self.logArgs.wandb_id) \
-                                        if self.logArgs.results_folder == "default" else self.logArgs.results_folder
-        self.mdpBuildArgs.save_folder = os.path.join(f".mdp_results/{self.logArgs.wandb_id}" ) \
-                                        if self.mdpBuildArgs.save_folder == "default" else self.mdpBuildArgs.save_folder
+        self.logArgs.results_folder = os.path.join(self.logArgs.results_folder,
+                                                self.logArgs.wandb_entity,
+                                                 self.logArgs.wandb_id) 
+
+        self.mdpBuildArgs.save_folder = os.path.join(self.logArgs.results_folder, "mdp_dump")
         
         if self.logArgs.cache_mdp2wandb and not self.mdpBuildArgs.save_mdp2cache:
             print("Setting save 2 cache as True, cannot upload to Wandb without Saving")
@@ -87,6 +88,7 @@ class BaseConfig(object):
         # Representation Arguments
         mdpBuildArgs = parser.add_argument_group(title="reprArgs", description="Dataset transformation / repr arguments")
         mdpBuildArgs.add_argument("--repr_build", help="Name of the repr build which will be used to build the DAC Agent.", default= "identity")
+        mdpBuildArgs.add_argument("--repr_save_dir", help="Directory where the representation will be saved.", default= "repr_model")
         
         
         # MDP Build parameters
