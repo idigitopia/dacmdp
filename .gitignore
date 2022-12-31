@@ -10,5 +10,4 @@ mdp_results
 wandb
 scraps
 media
-*.ipynb
-*.ipynb*
+*.ipynb_checkpoints*
