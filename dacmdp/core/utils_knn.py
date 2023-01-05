@@ -3,11 +3,12 @@ import torch
 import warnings
 # from knn_cuda import KNN as KNN_CUDA
 import math
+
 try:
     from pykeops.torch import LazyTensor
 except:
     print("Error in importing pykeops")
-    
+
 class THelper():
 
     @staticmethod

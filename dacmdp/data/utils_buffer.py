@@ -5,8 +5,7 @@ import torch
 import time
 import copy
 from types import SimpleNamespace
-import os 
-import d4rl
+import os
 
 
 
@@ -349,11 +348,13 @@ class StandardElasticBuffer(StandardBuffer):
 
 
 
-# Data Dependencies
-from d4rl.infos import DATASET_URLS as d4rl_envs
-from d4rl.offline_env import OfflineEnv
+
 
 def get_d4rl_dataset(env, d4rl_path):
+    # Data Dependencies
+    from d4rl.infos import DATASET_URLS as d4rl_envs
+    from d4rl.offline_env import OfflineEnv
+    import d4rl
     o_env = OfflineEnv(env)
     o_env.observation_space = env.observation_space
     o_env.action_space = env.action_space
