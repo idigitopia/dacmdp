@@ -341,8 +341,8 @@ class StandardElasticBuffer(StandardBuffer):
         self.reward[self.ptr:self.ptr+buffer.crt_size] =  buffer.reward[:buffer.crt_size]
         self.not_done[self.ptr:self.ptr+buffer.crt_size] = buffer.not_done[:buffer.crt_size]
         
-        self.crt_size += buffer.crt_size
-        self.ptr += buffer.ptr
+        self.crt_size = min(self.crt_size + buffer.crt_size, self.max_size)
+        self.ptr += buffer.crt_size
 
 
 

@@ -74,39 +74,68 @@ class DACBuildWithActionNames:
             self.repr_model = repr_model_store.fetch(self.config.reprModelArgs.repr_model_name)
         
     
-    def consume_transitions(self, transitions:DACTransitionBatch, batch_size = None, verbose = False):
-        self.dacmdp_core.init_transitions(transitions)
-        nn = len(self.dacmdp_core.S)
-        print("nn after consumption, " , nn)
-
+    def consume_transitions(self, transitions:DACTransitionBatch, 
+                            replace_at_indices = None, 
+                            batch_size = None, 
+                            verbose = False,):
+        #####  #####  Initialize Dacmdp_core tensors first  #####  #####  #####  #####  #####  #############################################
+        self.dacmdp_core.init_transitions(transitions, replace_at_indices = replace_at_indices)
+        nn, aa, tt = self.dacmdp_core.Ti.shape
         bb = transitions.states.size(0)
         batch_size = batch_size or bb
-
-        self.all_states = torch.concat([self.all_states, transitions.states])
-        self.all_actions = torch.concat([self.all_actions, transitions.actions])
-        self.all_next_states = torch.concat([self.all_next_states, transitions.next_states])
-        self.A_names = torch.concat([self.A_names, torch.zeros((bb,self.n_tran_types,self.action_dim))])
+        print("nn after consumption, " , nn)
+        #######################################################################################################################################
+        
+        
+        #####  #####  core tensor update prep step  #####  #####  #####  #####  #####  #############################################
+        if replace_at_indices is None :
+            # Append Transitions
+            self.all_states = torch.concat([self.all_states, transitions.states])
+            self.all_actions = torch.concat([self.all_actions, transitions.actions])
+            self.all_next_states = torch.concat([self.all_next_states, transitions.next_states])
+            self.A_names = torch.concat([self.A_names, torch.zeros((bb,self.n_tran_types,self.action_dim))])
+        else:
+            self.all_states[replace_at_indices] = transitions.states
+            self.all_actions[replace_at_indices] = transitions.actions
+            self.all_next_states[replace_at_indices] = transitions.next_states
+            self.A_names[replace_at_indices] = torch.zeros((bb,self.n_tran_types,self.action_dim))
         assert len(self.dacmdp_core.S) == len(self.all_next_states)
         assert len(self.dacmdp_core.S) == len(self.A_names)
-
+        #######################################################################################################################################
         
+        
+        #####  ##### Update new indices or replaced indices  #####  #####  #####  #####  #####  #############################################
+        u_indices = range(nn-bb, nn) if replace_at_indices is None else replace_at_indices
         ##################  self.fill_action_index_tensor(). ############################
-        for state_indices in viter_batch(range(nn-bb, nn),batch_size, verbose = verbose, label = "Calculate Candidate Actions"):
+        for state_indices in viter_batch(u_indices, batch_size, verbose = verbose, label = "Calculate Candidate Actions"):
             self.A_names[state_indices] = self.action_model.cand_actions_for_states(self.all_next_states[state_indices])
         ################################################################################################
 
         ##################  self.update_core_repr_tensors(). ############################
-        for state_indices in viter_batch(range(nn-bb, nn),batch_size, verbose = verbose, label = "Calculate/Update Datsaet SA Representation"):
+        for state_indices in viter_batch(u_indices, batch_size, verbose = verbose, label = "Calculate/Update Datsaet SA Representation"):
             self.calculate_n_set_dataset_representations(state_indices)
 
-        for state_indices in viter_batch(range(nn-bb, nn),batch_size, verbose = verbose, label = "Calculate/Update Candidate Transition SA Representation"):
+        for state_indices in viter_batch(u_indices, batch_size, verbose = verbose, label = "Calculate/Update Candidate Transition SA Representation"):
             self.calculate_n_set_transition_representations(state_indices)
         ################################################################################################
 
         ##################  self.update_core_dac_dynamics(). ############################
-        for state_indices in viter_batch(range(nn-bb, nn),batch_size, verbose = verbose, label = "Update Transition model of core dacmdp"):
+        for state_indices in viter_batch(u_indices, batch_size, verbose = verbose, label = "Update Transition model of core dacmdp"):
             self.dacmdp_core.update_tran_vectors(state_indices)
-
+            
+        ##################  self.update_core_dac_dynamics(). ############################
+        if replace_at_indices is not None:
+            affected_indices_tracker, placeholder_value = torch.zeros_like(self.dacmdp_core.V).cpu(), -(1e6)
+            affected_indices_tracker[replace_at_indices] = placeholder_value
+            affected_indices_mask = torch.min(torch.min(affected_indices_tracker[self.dacmdp_core.Ti], dim = -1).values, dim = -1).values == placeholder_value
+            r_u_indices = torch.nonzero(affected_indices_mask).reshape(-1)
+            for state_indices in viter_batch(r_u_indices, batch_size, verbose = verbose, label = "Update Transition model of stale states in dacmdp"):
+                self.dacmdp_core.update_tran_vectors(state_indices) 
+        #######################################################################################################################################
+        
+        
+        
+        
     def calculate_n_set_dataset_representations(self, state_indices):
         batch_size = len(state_indices)
         q_states, q_actions = self.all_states[state_indices], self.all_actions[state_indices]

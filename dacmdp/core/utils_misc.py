@@ -16,6 +16,11 @@ from munch import Munch
 
 # Project Specific Dependencies
 
+def tensor_set_minus(t1:torch.Tensor, t2:torch.Tensor)->torch.Tensor:
+    # Create a tensor to compare all values at once
+    compareview = t2.repeat(t1.shape[0],1).T
+    return t1[(compareview != t1).T.prod(1)==1]
+
 def timer_at_func(func):
     # This function shows the execution time of 
     # the function object passed

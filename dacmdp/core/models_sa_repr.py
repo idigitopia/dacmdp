@@ -72,28 +72,29 @@ class DeltaPredictonRepr(object):
         self.a_multiplyer = a_multiplyer
         self.concat_repr_model = WeightedConcatRepr(s_multiplyer, a_multiplyer)
 
-        self.state_store = torch.tensor(buffer.all_states)
+        self.state_store = torch.FloatTensor(buffer.all_states)
         # ep_end_tran_idxs = torch.nonzero(torch.tensor(buffer.all_ep_ends).reshape(-1)).reshape(-1)
         # self.state_store[ep_end_tran_idxs] = 9999*self.state_store[ep_end_tran_idxs] # Discount these from nn computation
-        self.action_store = torch.tensor(buffer.all_actions)
+        self.action_store = torch.FloatTensor(buffer.all_actions)
         self.next_state_store = torch.tensor(buffer.all_next_states)
 
-        self.sa_repr_store = [self.concat_repr_model.encode_state_action_pair(
-            s, a) for s, a in zip(self.state_store, self.action_store)]
+        self.sa_repr_store = torch.stack([self.concat_repr_model.encode_state_action_pair(
+            s, a) for s, a in zip(self.state_store, self.action_store)])
+        
 
         # create a kd tree.
         if nn_engine == "kd_tree":
-            self.s_kDTree = RawKDTree(self.obs_store)
+            self.s_kDTree = RawKDTree(self.sa_repr_store)
             self.batch_query_knn_s_idxs = lambda s_batch, k: self.s_kDTree.query(s_batch, k=k)[1]
         elif nn_engine == "torch_jit":
-            self.latent_S = torch.FloatTensor(self.obs_store).cuda()
+            self.latent_S = self.sa_repr_store.cuda()
             self.batch_query_knn_s_idxs = lambda s_batch, k: THelper.batch_calc_knn_jit(s_batch.cuda(), self.latent_S, k=k)[0].cpu()
         elif nn_engine == "torch_pykeops":
-            self.latent_S = torch.FloatTensor(self.obs_store).cuda()
+            self.latent_S = self.sa_repr_store.cuda()
             self.batch_query_knn_s_idxs = lambda s_batch, k: THelper.batch_calc_knn_pykeops(s_batch.cuda(), self.latent_S, k=k)[0].cpu()
         else:
             print(f"nn_engine {nn_engine} not defined. Switching to default. torch_jit")
-            self.latent_S = torch.FloatTensor(self.obs_store).cuda()
+            self.latent_S = self.sa_repr_store.cuda()
             self.batch_query_knn_s_idxs = lambda s_batch, k: THelper.batch_calc_knn_jit(s_batch.cuda(), self.latent_S, k=k)[0].cpu()
 
 
@@ -114,8 +115,8 @@ class DeltaPredictonRepr(object):
 
         # flatten states and actions (along the batch. )
         sa_reprs = self.concat_repr_model.encode_state_action_pairs(states, actions)
-        nn_idxs = self.batch_query_knn_s_idxs(sa_reprs, k = 1).reshape(-1)
-        deltas = torch.stack([self.next_state_store[i] - self.state_store[i] for i in nn_idxs])
+        nn_idxs = self.batch_query_knn_s_idxs(sa_reprs, k = 2)[:,0].reshape(-1)
+        deltas = self.next_state_store[nn_idxs] - self.state_store[nn_idxs]
         out = states + deltas
         return out.type(torch.float32)
 

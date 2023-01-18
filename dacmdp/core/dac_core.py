@@ -6,7 +6,7 @@ from functools import partial
 from munch import Munch
 
 from .utils_knn import THelper
-
+# from .utils_misc import tensor_set_minus
 
 from dataclasses import dataclass
 @dataclass
@@ -114,34 +114,35 @@ class DACMDP_CORE():
         self.dac_constants.penalty_type = penalty_type
 
         # Dataset Caches
-        self.D_rewards = torch.FloatTensor([]).to(self.device)
-        self.D_repr = torch.FloatTensor([]).to(self.device)
-        self.D_terminal_indices = torch.LongTensor([]).to(self.device)
+        self.D_rewards = torch.FloatTensor([]).to("cuda")
+        self.D_terminals = torch.LongTensor([]).to("cuda")
+        self.D_terminal_indices = torch.LongTensor([]).to("cuda")
+        self.D_repr = torch.FloatTensor([]).to("cuda")
 
         # Core States
-        self.S = torch.FloatTensor([]).to(self.device)
+        self.S = torch.FloatTensor([]).to("cuda")
         self.S.index = partial(THelper.lookup_index_by_hash, torch_matrix=self.S)
         self.S.nn_index = partial(THelper.lookup_index_by_hash, torch_matrix=self.S)
 
         # Base Represenations for all core states and candidate actions
-        self.T_repr = torch.FloatTensor([]).to(self.device)
+        self.T_repr = torch.FloatTensor([]).to("cpu")
 
         # MDP Tensors
-        self.Ti = torch.tensor([]).type(torch.LongTensor).to(device=device) # (nn, aa, tt)  ||  Transiton Indexes
-        self.Tp = torch.tensor([]).type(torch.float32).to(device=device) # (nn, aa, tt)  ||  Transition Probabilities
-        self.R = torch.tensor([]).type(torch.float32).to(device=device) # (nn, aa, tt)  ||  Transition Rewards
-        self.Tdist = torch.tensor([]).type(torch.float32).to(device=device) # (nn, aa, tt)  ||  Distances for s,a,s' approximations
-        self.P = torch.tensor([]).type(torch.float32).to(device=device) # (nn, aa, tt)  ||  Penalites for s,a,s' approximations
-        self.Q = torch.tensor([]).type(torch.float32).to(device=device) # (nn, aa)  ||  Q values for each state tran_type pair
-        self.V = torch.tensor([]).type(torch.float32).to(device=device) # (nn,)  ||  Value Vector
-        self.C = torch.tensor([]).type(torch.float32).to(device=device) # (nn,)  ||  Cost of optimal policy for each state.
-        self.Pi = torch.tensor([]).type(torch.LongTensor).to(device=device) # (nn,)  ||  Policy Vector
+        self.Ti = torch.tensor([]).type(torch.LongTensor).to("cuda") # (nn, aa, tt)  ||  Transiton Indexes
+        self.Tp = torch.tensor([]).type(torch.float32).to("cuda") # (nn, aa, tt)  ||  Transition Probabilities
+        self.R = torch.tensor([]).type(torch.float32).to("cuda") # (nn, aa, tt)  ||  Transition Rewards
+        self.Tdist = torch.tensor([]).type(torch.float32).to("cuda") # (nn, aa, tt)  ||  Distances for s,a,s' approximations
+        self.P = torch.tensor([]).type(torch.float32).to("cuda") # (nn, aa, tt)  ||  Penalites for s,a,s' approximations
+        self.Q = torch.tensor([]).type(torch.float32).to("cuda") # (nn, aa)  ||  Q values for each state tran_type pair
+        self.V = torch.tensor([]).type(torch.float32).to("cuda") # (nn,)  ||  Value Vector
+        self.C = torch.tensor([]).type(torch.float32).to("cuda") # (nn,)  ||  Cost of optimal policy for each state.
+        self.Pi = torch.tensor([]).type(torch.LongTensor).to("cuda") # (nn,)  ||  Policy Vector
 
         # MDP Solve helper variables
         self.gamma = torch.FloatTensor([0.99]).to(device)
 
 
-    def init_transitions(self, transitions: DACTransitionBatch, verbose = False):
+    def init_transitions(self, transitions: DACTransitionBatch, replace_at_indices = None, verbose = False):
         # all_states = torch.tensor([t[0] for t in  transitions]).type(torch.FloatTensor)
         # all_actions = torch.tensor([t[1] for t in  transitions]).type(torch.FloatTensor)
         # self.transitions = transitions
@@ -151,36 +152,57 @@ class DACMDP_CORE():
         batch_terminal_indices = batch_terminals.nonzero().type(torch.LongTensor).reshape(-1)
         batch_next_states[batch_terminal_indices] = 999999
 
+        
         print("batch_next_states.shape", batch_next_states.shape )
+        print("replace indices : ", replace_at_indices is not None, batch_next_states.shape )
+        
         # update next states
         bb = len(batch_next_states)
-        nn, aa, tt = len(self.S) + bb, self.dac_constants.n_tran_types, self.dac_constants.n_tran_targets
+        nn = (len(self.S) + bb) if replace_at_indices is None else len(self.S) 
+        aa, tt = self.dac_constants.n_tran_types, self.dac_constants.n_tran_targets
 
         ####################### Append Dataset Caches and base represenations##################
-        self.D_rewards = torch.concat([self.D_rewards, batch_rewards.to(self.device)])
-        self.D_terminal_indices = torch.concat([self.D_terminal_indices, batch_terminal_indices.to(self.device)], dim = 0)
-        self.D_repr = torch.concat([self.D_repr, torch.zeros((bb, self.dac_constants.sa_repr_dim)).type(torch.float32).to(self.device)], dim = 0)
-        self.T_repr = torch.concat([self.T_repr, torch.zeros((bb, aa, self.dac_constants.sa_repr_dim)).type(torch.float32).to(self.device)], dim = 0)
-        assert self.D_rewards.shape == (nn,), f"D_rewards shape : {self.D_rewards.shape }"
+        if replace_at_indices is None:
+            self.D_rewards = torch.concat([self.D_rewards, batch_rewards.to("cuda")])
+            self.D_terminals = torch.concat([self.D_terminals, batch_terminals.to("cuda")])
+            self.D_repr = torch.concat([self.D_repr, torch.zeros((bb, self.dac_constants.sa_repr_dim)).type(torch.float32).to("cuda")], dim = 0)
+            self.T_repr = torch.concat([self.T_repr, torch.zeros((bb, aa, self.dac_constants.sa_repr_dim)).type(torch.float32).to("cpu")], dim = 0)
+        else:
+            for T in [self.D_repr, self.T_repr]:
+                T[replace_at_indices] = 0
+            self.D_rewards[replace_at_indices] = batch_rewards.to("cuda")
+            self.D_terminals[replace_at_indices] = batch_terminals.to("cuda")
+                
+        self.D_terminal_indices = self.D_terminals.nonzero().type(torch.LongTensor).reshape(-1)
+        assert self.D_rewards.shape == (nn,), f"D_rewards shape : {self.D_rewards.shape}, {nn}"
         assert self.D_repr.shape == (nn, self.dac_constants.sa_repr_dim)
         assert self.T_repr.shape == (nn, aa, self.dac_constants.sa_repr_dim)
         ###############################################################################################################
 
         ####################### Append Core States ##################
-        self.S = torch.concat([self.S, batch_next_states.to(self.device)], dim = 0)  # core states contains only target vectors.
+        if replace_at_indices is None:
+            self.S = torch.concat([self.S, batch_next_states.to("cuda")], dim = 0)  # core states contains only target vectors.
+        else:
+            self.S[replace_at_indices] = batch_next_states.to("cuda")  # core states contains only target vectors.
+            
         assert self.S.size(0) == nn
         ###############################################################################################################
 
         ####################### Append MDP Tensors ##################
-        self.Tp = torch.concat([self.Tp, torch.zeros((bb, aa, tt)).type(torch.float32).to(self.device)], dim = 0)
-        self.Ti = torch.concat([self.Ti, torch.zeros((bb, aa, tt)).type(torch.LongTensor).to(self.device)], dim = 0)
-        self.R = torch.concat([self.R, torch.zeros((bb, aa, tt)).type(torch.float32).to(self.device)], dim = 0)
-        self.Tdist = torch.concat([self.Tdist, torch.zeros((bb, aa, tt)).type(torch.float32).to(self.device)], dim = 0) # Distances for s,a,s' approximations
-        self.P = torch.concat([self.P, torch.zeros((bb, aa, tt)).type(torch.float32).to(self.device)], dim = 0) # Penalites for s,a,s' approximations
-        self.Q = torch.concat([self.Q, torch.zeros((bb, aa)).type(torch.float32).to(self.device)], dim = 0)
-        self.V = torch.concat([self.V, torch.zeros((bb,)).type(torch.float32).to(self.device)], dim = 0)
-        self.C = torch.concat([self.C, torch.zeros((bb,)).type(torch.float32).to(self.device)], dim = 0) # Cost of optimal policy for each state.
-        self.Pi = torch.concat([self.Pi, torch.zeros((bb)).type(torch.LongTensor).to(self.device)], dim = 0)
+        if replace_at_indices is None: 
+            self.Tp = torch.concat([self.Tp, torch.zeros((bb, aa, tt)).type(torch.float32).to("cuda")], dim = 0)
+            self.Ti = torch.concat([self.Ti, torch.zeros((bb, aa, tt)).type(torch.LongTensor).to("cuda")], dim = 0)
+            self.R = torch.concat([self.R, torch.zeros((bb, aa, tt)).type(torch.float32).to("cuda")], dim = 0)
+            self.Tdist = torch.concat([self.Tdist, torch.zeros((bb, aa, tt)).type(torch.float32).to("cuda")], dim = 0) # Distances for s,a,s' approximations
+            self.P = torch.concat([self.P, torch.zeros((bb, aa, tt)).type(torch.float32).to("cuda")], dim = 0) # Penalites for s,a,s' approximations
+            self.Q = torch.concat([self.Q, torch.zeros((bb, aa)).type(torch.float32).to("cuda")], dim = 0)
+            self.V = torch.concat([self.V, torch.zeros((bb,)).type(torch.float32).to("cuda")], dim = 0)
+            self.C = torch.concat([self.C, torch.zeros((bb,)).type(torch.float32).to("cuda")], dim = 0) # Cost of optimal policy for each state.
+            self.Pi = torch.concat([self.Pi, torch.zeros((bb)).type(torch.LongTensor).to("cuda")], dim = 0)
+        else:
+            for T in [self.Tp, self.Ti, self.R, self.Tdist, self.P, self.Q, self.V, self.C, self.Pi]:
+                T[replace_at_indices] = 0
+                
         assert self.Tp.shape == (nn, aa, tt)
         assert self.Ti.shape == (nn, aa, tt)
         assert self.R.shape == (nn, aa, tt)
@@ -191,11 +213,10 @@ class DACMDP_CORE():
         assert self.C.shape == (nn,)
         assert self.Pi.shape == (nn,)
         ###############################################################################################################
-
-        if verbose:
-            print(f"Instantiated DACMDP for transition Batch {self.device}, {self.Ti.device}")
-            print((nn, aa, tt))
-
+        
+        print(f"Instantiated DACMDP for transition Batch")
+        print((nn, aa, tt))
+                
 
     def set_transition_reprsentations(self, tran_repr_sets: torch.tensor, state_indices: torch.tensor) -> bool:
         """ each transtition representation represents a transtion type and is used to
@@ -205,7 +226,7 @@ class DACMDP_CORE():
         """
         n, a, t = tran_repr_sets.shape
         assert a == self.dac_constants.n_tran_types and t == self.dac_constants.sa_repr_dim and n == len(state_indices)
-        self.T_repr[state_indices] = tran_repr_sets.to(self.device)
+        self.T_repr[state_indices] = tran_repr_sets.to("cpu")
         return True
 
     def set_dataset_representations(self, sa_reprs: torch.tensor, state_indices: torch.tensor) -> bool:
@@ -222,7 +243,7 @@ class DACMDP_CORE():
         # Get KNN and calculate transition tensors
         T_repr_slice = self.T_repr[state_indices]
         nn, aa, s_dim = T_repr_slice.shape
-        all_sa_reprs = T_repr_slice.view((-1, self.dac_constants.sa_repr_dim))
+        all_sa_reprs = T_repr_slice.view((-1, self.dac_constants.sa_repr_dim)).cuda()
         nn_indices_flat, nn_values_flat = self.batch_calc_knn_ret_flat_engine(all_sa_reprs, self.D_repr, k=self.dac_constants.n_tran_targets)
         knn_idx_tensor = nn_indices_flat.view((nn, aa, self.dac_constants.n_tran_targets)).to(self.device)
         knn_values_tensor = nn_values_flat.view((nn, aa, self.dac_constants.n_tran_targets)).to(self.device)
@@ -242,7 +263,7 @@ class DACMDP_CORE():
             self.Tp[state_indices] = torch.nn.Softmax(dim = 2)(torch.log(1/(knn_values_tensor+0.0001)))
         else: 
             assert False, f"logic for penalty type {self.dac_constants.penalty_type} not defined"
-    
+        
         # Reset for terminal transitions , no need to update
         self.Ti[self.D_terminal_indices] = 0
         self.Tp[self.D_terminal_indices] = 0
