@@ -4,10 +4,13 @@ import warnings
 # from knn_cuda import KNN as KNN_CUDA
 import math
 
-try:
-    from pykeops.torch import LazyTensor
-except:
-    print("Error in importing pykeops")
+
+import time
+import torch
+from matplotlib import pyplot as plt
+from pykeops.torch import LazyTensor
+
+
 
 class THelper():
 
@@ -48,6 +51,14 @@ class THelper():
 
     @staticmethod
     def calc_knn_indices(query: torch.Tensor, data: torch.Tensor, k):
+        dist = torch.norm(data - query, dim=1, p=2)
+        knn = dist.topk(k, largest=False)
+        return knn.indices
+
+    
+    @staticmethod
+    @torch.jit.script
+    def calc_knn_indices_jit(query: torch.Tensor, data: torch.Tensor, k:int):
         dist = torch.norm(data - query, dim=1, p=2)
         knn = dist.topk(k, largest=False)
         return knn.indices
@@ -104,13 +115,105 @@ class THelper():
         nn_idx, nn_dists = THelper.batch_calc_knn_pykeops(query, data, k)
         return nn_idx.view(-1), nn_dists.view(-1)
 
-    # @staticmethod
-    # def batch_calc_knn_cuda(query_batch: torch.Tensor, data: torch.Tensor, k:int):
-    #     knn_kernel = KNN_CUDA(k, transpose_mode=True)
-    #     nn_dists, nn_idx = knn_kernel(data, query_batch)
-    #     return nn_idx, nn_dists
+
+
+def KMeans(x, K=10, Niter=10, verbose=True):
+    """Implements Lloyd's algorithm for the Euclidean metric."""
+
+    use_cuda = torch.cuda.is_available()
+    dtype = torch.float32 if use_cuda else torch.float64
+    device_id = "cuda:0" if use_cuda else "cpu"
     
-    # @staticmethod
-    # def batch_calc_knn_ret_flat_cuda(query_batch: torch.Tensor, data: torch.Tensor, k: int):
-    #     nn_idx, nn_dists = THelper.batch_calc_knn_cuda(query_batch, data, k)
-    #     return nn_idx.view(-1), nn_dists.view(-1)
+    start = time.time()
+    N, D = x.shape  # Number of samples, dimension of the ambient space
+
+    c = x[:K, :].clone()  # Simplistic initialization for the centroids
+
+    x_i = LazyTensor(x.view(N, 1, D))  # (N, 1, D) samples
+    c_j = LazyTensor(c.view(1, K, D))  # (1, K, D) centroids
+
+    # K-means loop:
+    # - x  is the (N, D) point cloud,
+    # - cl is the (N,) vector of class labels
+    # - c  is the (K, D) cloud of cluster centroids
+    for i in range(Niter):
+
+        # E step: assign points to the closest cluster -------------------------
+        D_ij = ((x_i - c_j) ** 2).sum(-1)  # (N, K) symbolic squared distances
+        cl = D_ij.argmin(dim=1).long().view(-1)  # Points -> Nearest cluster
+
+        # M step: update the centroids to the normalized cluster average: ------
+        # Compute the sum of points per cluster:
+        c.zero_()
+        c.scatter_add_(0, cl[:, None].repeat(1, D), x)
+
+        # Divide by the number of points per cluster:
+        Ncl = torch.bincount(cl, minlength=K).type_as(c).view(K, 1)
+        c /= Ncl  # in-place division to compute the average
+
+    if verbose:  # Fancy display -----------------------------------------------
+        if use_cuda:
+            torch.cuda.synchronize()
+        end = time.time()
+        print(
+            f"K-means for the Euclidean metric with {N:,} points in dimension {D:,}, K = {K:,}:"
+        )
+        print(
+            "Timing for {} iterations: {:.5f}s = {} x {:.5f}s\n".format(
+                Niter, end - start, Niter, (end - start) / Niter
+            )
+        )
+
+    return cl, c
+
+
+def KMeans_cosine(x, K=10, Niter=10, verbose=True):
+    """Implements Lloyd's algorithm for the Cosine similarity metric."""
+
+
+    use_cuda = torch.cuda.is_available()
+    dtype = torch.float32 if use_cuda else torch.float64
+    device_id = "cuda:0" if use_cuda else "cpu"
+
+    start = time.time()
+    N, D = x.shape  # Number of samples, dimension of the ambient space
+
+    c = x[:K, :].clone()  # Simplistic initialization for the centroids
+    # Normalize the centroids for the cosine similarity:
+    c = torch.nn.functional.normalize(c, dim=1, p=2)
+
+    x_i = LazyTensor(x.view(N, 1, D))  # (N, 1, D) samples
+    c_j = LazyTensor(c.view(1, K, D))  # (1, K, D) centroids
+
+    # K-means loop:
+    # - x  is the (N, D) point cloud,
+    # - cl is the (N,) vector of class labels
+    # - c  is the (K, D) cloud of cluster centroids
+    for i in range(Niter):
+
+        # E step: assign points to the closest cluster -------------------------
+        S_ij = x_i | c_j  # (N, K) symbolic Gram matrix of dot products
+        cl = S_ij.argmax(dim=1).long().view(-1)  # Points -> Nearest cluster
+
+        # M step: update the centroids to the normalized cluster average: ------
+        # Compute the sum of points per cluster:
+        c.zero_()
+        c.scatter_add_(0, cl[:, None].repeat(1, D), x)
+
+        # Normalize the centroids, in place:
+        c[:] = torch.nn.functional.normalize(c, dim=1, p=2)
+
+    if verbose:  # Fancy display -----------------------------------------------
+        if use_cuda:
+            torch.cuda.synchronize()
+        end = time.time()
+        print(
+            f"K-means for the cosine similarity with {N:,} points in dimension {D:,}, K = {K:,}:"
+        )
+        print(
+            "Timing for {} iterations: {:.5f}s = {} x {:.5f}s\n".format(
+                Niter, end - start, Niter, (end - start) / Niter
+            )
+        )
+
+    return cl, c

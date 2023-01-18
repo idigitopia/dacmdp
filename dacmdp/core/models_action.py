@@ -177,20 +177,30 @@ class NNActionModel(BaseActionModel):
         return "NNActionModel"
 
 
+from .utils_knn import KMeans as KMeans_plykeops
+from .utils_knn import KMeans_cosine as KMeans_cosine_plykeops
+
+
 class GlobalClusterActionModel(BaseActionModel):
 
-    def __init__(self, action_space, n_actions, data_buffer):
+    def __init__(self, action_space, n_actions, data_buffer, cosine_dist = False):
         # will only work for feature representation of states, not images.
         # one can also do a random projection step here if images are passed.
         super().__init__(action_space, n_actions)
+
+        self.cosine_dist = cosine_dist
         
-        action_array = data_buffer.action[:data_buffer.crt_size]
-        kmeans = KMeans(n_clusters=n_actions, random_state=0).fit(action_array)
-        self.actions = np.array(kmeans.cluster_centers_)
+        action_array = torch.FloatTensor(data_buffer.action[:data_buffer.crt_size]).cuda()
+        if self.cosine_dist:
+            cl,c = KMeans_cosine_plykeops(action_array, K=n_actions, Niter=50)
+        else:
+            cl,c = KMeans_plykeops(action_array, K=n_actions, Niter=50)
+
+        self.actions = c.cpu()
         self.n_actions = n_actions
 
     def cand_actions_for_states(self, states) -> np.ndarray:
-        return torch.FloatTensor(np.stack([self.actions for _ in states]))
+        return self.actions.repeat(len(states), 1, 1)
 
     def __repr__(self):
         return "GlobalClusterActionModel"
