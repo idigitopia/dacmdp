@@ -179,46 +179,47 @@ class StandardBuffer(object):
 
     # Normalization Logic
     def normalize(self, normalize_state = True, normalize_action = False, eps = 1e-3):
+        (state_mean, state_std), (action_mean, action_std) = self.fetch_normalization_statistics(eps)
+        state_mean, state_std = state_mean.numpy(), state_std.numpy()
+        action_mean, action_std = action_mean.numpy(), action_std.numpy()
         if normalize_state:
-            self.state[:self.crt_size] = (self.state[:self.crt_size] - mean)/std
-            self.next_state[:self.crt_size] = (self.next_state[:self.crt_size] - mean)/std
+            self.state[:self.crt_size] = (self.state[:self.crt_size] - state_mean)/state_std
+            self.next_state[:self.crt_size] = (self.next_state[:self.crt_size] - state_mean)/state_std
 
             self.norm_params.is_state_normalized = True  
-            self.norm_params.state_mean, self.norm_params.state_std = mean, std
+            self.norm_params.state_mean, self.norm_params.state_std = state_mean, state_std
         
         if normalize_action:
-            mean = self.action[:self.crt_size].mean(0,keepdims=True)
-            std = self.action[:self.crt_size].std(0,keepdims=True) + eps
-            self.action[:self.crt_size] = (self.action[:self.crt_size] - mean)/std
+            self.action[:self.crt_size] = (self.action[:self.crt_size] - action_mean)/action_std
 
             self.norm_params.is_action_normalized = True  
-            self.norm_params.action_mean, self.norm_params.action_std = mean, std
+            self.norm_params.action_mean, self.norm_params.action_std = action_mean, action_std
         
         return self.norm_params
 
-    def query_normalized_state(self, state):
+    def query_normalized_state(self, states):
         if self.norm_params.is_state_normalized:
-            return (state - self.norm_params.state_mean.reshape(-1))/self.norm_params.state_std.reshape(-1)
+            return (states - self.norm_params.state_mean)/self.norm_params.state_std
         else:
-            return  state
+            return  states
     
-    def query_denormalized_state(self, state):
+    def query_denormalized_state(self, states):
         if self.norm_params.is_state_normalized:
-            return (state * self.norm_params.state_std.reshape(-1)) + self.norm_params.state_mean.reshape(-1)
+            return (states * self.norm_params.state_std) + self.norm_params.state_mean
         else:
-            return  state
+            return  states
 
-    def query_normalized_action(self, action):
+    def query_normalized_action(self, actions):
         if self.norm_params.is_action_normalized:
-            return (action - self.norm_params.action_mean.reshape(-1))/self.norm_params.action_std.reshape(-1)
+            return (actions - self.norm_params.action_mean)/self.norm_params.action_std
         else:
-            return action
+            return actions
 
-    def query_denormalized_action(self, action):
+    def query_denormalized_action(self, actions):
         if self.norm_params.is_action_normalized:
-            return (action * self.norm_params.action_std.reshape(-1)) + self.norm_params.action_mean.reshape(-1)
+            return (actions * self.norm_params.action_std) + self.norm_params.action_mean
         else:
-            return action
+            return actions
 
 
 
