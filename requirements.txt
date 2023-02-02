@@ -4,3 +4,4 @@ munch
 pykeops
 scikit-learn
 matplotlib
+torch

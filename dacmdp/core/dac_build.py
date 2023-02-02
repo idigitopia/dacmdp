@@ -156,7 +156,7 @@ class DACBuildWithActionNames:
 
     # policy liftup functions
     def dummy_lifted_policy(self, s):
-        nn_s_idx =  THelper.calc_knn_indices_cuda(torch.FloatTensor(s).to(self.device), self.dacmdp_core.S, 1)[0]
+        nn_s_idx =  THelper.calc_knn_indices_jit(torch.FloatTensor(s).to(self.device), self.dacmdp_core.S, 1)[0]
         policy_idx = self.dacmdp_core.Pi[nn_s_idx] 
         return self.A_names[nn_s_idx,policy_idx]
 
