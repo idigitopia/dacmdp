@@ -5,3 +5,4 @@ pykeops
 scikit-learn
 matplotlib
 torch
+jupyterlab

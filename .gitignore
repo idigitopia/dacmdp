@@ -11,3 +11,5 @@ wandb
 scraps
 media
 *.ipynb_checkpoints*
+examples/*dump*
+examples/*Dump*

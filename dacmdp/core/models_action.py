@@ -80,7 +80,7 @@ class BaseActionModel:
         raise NotImplementedError
     
     def cand_actions_for_state(self, state: torch.Tensor) -> torch.Tensor:
-        return self.cand_actions_for_states(state.unsqueeze(0)[0]) 
+        return self.cand_actions_for_states(state.unsqueeze(0))[0]
 
     def random_action(self):
         return torch.FloatTensor(sample_from_action_space(self.action_space))
@@ -180,23 +180,31 @@ class NNActionModel(BaseActionModel):
 from .utils_knn import KMeans as KMeans_plykeops
 from .utils_knn import KMeans_cosine as KMeans_cosine_plykeops
 
-
 class GlobalClusterActionModel(BaseActionModel):
 
-    def __init__(self, action_space, n_actions, data_buffer, cosine_dist = False):
+    def __init__(self, action_space, n_actions, data_buffer, cosine_dist = False, engine = "py_keops"):
         # will only work for feature representation of states, not images.
         # one can also do a random projection step here if images are passed.
         super().__init__(action_space, n_actions)
 
         self.cosine_dist = cosine_dist
         
-        action_array = torch.FloatTensor(data_buffer.action[:data_buffer.crt_size]).cuda()
-        if self.cosine_dist:
-            cl,c = KMeans_cosine_plykeops(action_array, K=n_actions, Niter=50)
-        else:
-            cl,c = KMeans_plykeops(action_array, K=n_actions, Niter=50)
+        action_array = torch.FloatTensor(data_buffer.all_actions).cuda()
 
-        self.actions = c.cpu()
+        if engine == "sklearn":
+            from sklearn.cluster import KMeans
+            # Create KMeans instance
+            kmeans = KMeans(n_clusters=n_actions)
+            kmeans.fit(action_array.cpu().numpy()) 
+            self.actions = torch.FloatTensor(kmeans.cluster_centers_).cpu()
+            # Fit model
+        else:
+            if self.cosine_dist:
+                cl,c = KMeans_cosine_plykeops(action_array, K=n_actions, Niter=50)
+            else:
+                cl,c = KMeans_plykeops(action_array, K=n_actions, Niter=50)
+
+                self.actions = c.cpu()
         self.n_actions = n_actions
 
     def cand_actions_for_states(self, states) -> np.ndarray:

@@ -388,7 +388,7 @@ def load_from_d4rl(config,env):
     else:
         action_shape = env.action_space.shape
 
-    buffer = StandardBuffer(state_shape = env.observation_space.shape,
+    buffer = StandardElasticBuffer(state_shape = env.observation_space.shape,
                            action_shape = action_shape, 
                            batch_size=32, 
                            buffer_size=config.dataArgs.buffer_size,
@@ -431,13 +431,13 @@ def collect_buffer(config, env):
     print('Collecting buffer!')
 
 
-    train_buffer = StandardBuffer(state_shape = env.observation_space.shape,
+    train_buffer = StandardElasticBuffer(state_shape = env.observation_space.shape,
                                action_shape = [len(env.action_space.sample())], # for discrete settings. 
                                batch_size=32, 
                                buffer_size=config.dataArgs.buffer_size,
                                device="cpu")
     
-    train_buffer, info = StandardBuffer.populate_buffer(train_buffer, env, 
+    train_buffer, info = StandardElasticBuffer.populate_buffer(train_buffer, env, 
                                            policy = lambda s:env.action_space.sample(),
                                            episode_count=99999, 
                                            frame_count=config.dataArgs.buffer_size)

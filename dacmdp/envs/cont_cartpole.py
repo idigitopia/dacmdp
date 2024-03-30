@@ -109,10 +109,10 @@ Any further steps are undnp.float32(low), np.float32(high)efined behavior.
             self.steps_beyond_done += 1
             reward = 0.0
 
-        return np.array(self.state), reward, done, {}
+        return np.array(self.state).astype(np.float32), reward, done, {}
 
     def reset(self):
-        self.state = self.np_random.uniform(low=-0.05, high=0.05, size=(4,))
+        self.state = self.np_random.uniform(low=-0.05, high=0.05, size=(4,)).astype(np.float32)
         self.steps_beyond_done = None
         self.step_count = 0
         return np.array(self.state)
