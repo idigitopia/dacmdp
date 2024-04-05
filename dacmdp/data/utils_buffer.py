@@ -356,6 +356,7 @@ def get_d4rl_dataset(env, d4rl_path):
     from d4rl.infos import DATASET_URLS as d4rl_envs
     from d4rl.offline_env import OfflineEnv
     import d4rl
+    
     o_env = OfflineEnv(env)
     o_env.observation_space = env.observation_space
     o_env.action_space = env.action_space
@@ -382,6 +383,11 @@ def load_from_d4rl(config,env):
     defines a new buffer, and loads it from the pre-configured load path. 
     follows d4rl data definition for storing datasets
     """
+    # Data Dependencies
+    from d4rl.infos import DATASET_URLS as d4rl_envs
+    from d4rl.offline_env import OfflineEnv
+    import d4rl
+    
     print('Loading buffer!')
     if config.envArgs.env_name in ["CartPole-cont-v1", "CartPole-cont-noisy-v1"]:
         action_shape = [1]  
