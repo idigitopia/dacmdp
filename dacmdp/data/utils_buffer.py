@@ -6,7 +6,7 @@ import time
 import copy
 from types import SimpleNamespace
 import os
-
+import gym
 
 
 # Generic replay buffer for standard gym tasks
@@ -436,9 +436,13 @@ def collect_buffer(config, env):
 
     print('Collecting buffer!')
 
+    if isinstance(env.action_space, gym.spaces.Discrete):
+        action_shape = [1]
+    else:
+        action_shape = [len(env.action_space.sample())]
 
     train_buffer = StandardElasticBuffer(state_shape = env.observation_space.shape,
-                               action_shape = [len(env.action_space.sample())], # for discrete settings. 
+                               action_shape = action_shape, # for discrete settings. 
                                batch_size=32, 
                                buffer_size=config.dataArgs.buffer_size,
                                device="cpu")

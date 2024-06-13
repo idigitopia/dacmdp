@@ -7,15 +7,41 @@ from munch import Munch
 
 from .utils_knn import THelper
 # from .utils_misc import tensor_set_minus
-
 from dataclasses import dataclass
+
 @dataclass
 class DACTransitionBatch:
-    states : torch.FloatTensor
+    states: torch.FloatTensor
     actions: torch.FloatTensor
     next_states: torch.FloatTensor
     rewards: torch.FloatTensor
     terminals: torch.LongTensor
+
+    @classmethod
+    def combine_transition_batches(cls, list_of_transition_batches):
+        # Check if the list is empty
+        if not list_of_transition_batches:
+            raise ValueError("The list of transition batches cannot be empty")
+
+        # Initialize combined attributes with the first batch to ensure correct shapes and types
+        combined_states = list_of_transition_batches[0].states
+        combined_actions = list_of_transition_batches[0].actions
+        combined_next_states = list_of_transition_batches[0].next_states
+        combined_rewards = list_of_transition_batches[0].rewards
+        combined_terminals = list_of_transition_batches[0].terminals
+
+        # Iterate over the remaining batches and concatenate them
+        for batch in list_of_transition_batches[1:]:
+            combined_states = torch.cat([combined_states, batch.states], dim=0)
+            combined_actions = torch.cat([combined_actions, batch.actions], dim=0)
+            combined_next_states = torch.cat([combined_next_states, batch.next_states], dim=0)
+            combined_rewards = torch.cat([combined_rewards, batch.rewards], dim=0)
+            combined_terminals = torch.cat([combined_terminals, batch.terminals], dim=0)
+
+        # Return a new DACTransitionBatch instance with the combined data
+        return cls(states=combined_states, actions=combined_actions, next_states=combined_next_states,
+                   rewards=combined_rewards, terminals=combined_terminals)
+
 
 
 class DACMDP_CORE():
