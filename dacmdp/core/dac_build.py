@@ -21,6 +21,8 @@ class DACBuildWithActionNames:
                 action_model, repr_model,
                 effective_batch_size = 1000, 
                 batch_calc_knn_ret_flat_engine =  THelper.batch_calc_knn_ret_flat_jit):
+ 
+        print("HURRAY , New Model loaded 104")
 
         self.effective_batch_size = effective_batch_size
         
@@ -162,23 +164,48 @@ class DACBuildWithActionNames:
         action = self.A_names[nn_s_idx,policy_idx]
         return int(action.cpu().item()) if isinstance(self.action_space, gym.spaces.Discrete) else action
 
-    def lifted_policy(self,s):
-        nn, aa, tt = 1, self.n_tran_types, self.dacmdp_core.n_tran_targets
+
+    def dac_nn_policy(self, s, policy_k = 5):
+        # Encode the state.
+    
         cand_actions = self.action_model.cand_actions_for_state(s)
+    
+        nn_s_idx =  THelper.calc_knn_indices_jit(torch.FloatTensor(s).to(self.device), self.dacmdp_core.S, policy_k)
+        nn_mean_Q_vals = torch.mean(self.dacmdp_core.Q[nn_s_idx], dim = 0)
+    
+        max_a_slot = torch.argmax(nn_mean_Q_vals)
+        dummy_policy_action = cand_actions[max_a_slot].type(torch.int).item()
+    
+        return dummy_policy_action
+    
+
+    def dac_lifted_policy(self,s):
+                
+        aa, tt = self.n_tran_types, self.dacmdp_core.dac_constants.n_tran_targets # number of Actions, number of targets for each action prediction.
+        cand_actions = self.action_model.cand_actions_for_state(s) # is equal to the number of actions / transition types
         sa_reprs = self.repr_model.encode_state_action_pairs(torch.FloatTensor(s).repeat(self.n_tran_types).view(-1,len(s)),
-                                                            cand_actions).to(self.device)
+                                                            cand_actions).to(self.device) # SA Representations
         nn_indices_flat, nn_values_flat = THelper.batch_calc_knn_ret_flat(sa_reprs, self.dacmdp_core.D_repr, k=tt)
-        knn_idx_tensor = nn_indices_flat.view((nn, aa, tt)).to(self.device)
-        knn_dists_tensor = nn_values_flat.view((nn, aa, tt)).to(self.device)
+        knn_idx_tensor = nn_indices_flat.view((aa, tt)).to(self.device)
+        knn_dists_tensor = nn_values_flat.view((aa, tt)).to(self.device)
         
+        Tp = torch.nn.Softmax(dim = 1)(torch.log(1/(knn_dists_tensor+0.0001)))
+
+        # Penalty 
+        P = self.dacmdp_core.dac_constants.penalty_beta * knn_dists_tensor
+        R_data = self.dacmdp_core.D_rewards[knn_idx_tensor.view(-1)].reshape(knn_idx_tensor.shape)
+        R = R_data - P
+        V = self.dacmdp_core.V[nn_indices_flat].view((aa, tt)).to(self.device)
+        C = self.dacmdp_core.C[nn_indices_flat].view((aa, tt)).to(self.device)
+
+        # import pdb; pdb.set_trace()
+        # print(R.shape)
+        Q_vals = torch.sum( Tp*(R+V), dim = 1).reshape(-1)
+        C_vals = torch.sum(Tp*(P+C), dim = 1).reshape(-1)
+        max_a_slot = torch.argmax(Q_vals)
         
-        Tp = torch.nn.Softmax(dim = 2)(torch.log(1/(knn_dists_tensor+0.0001)))
-        R = self.dacmdp_core.D_rewards[knn_idx_tensor.view(-1)].reshape(knn_idx_tensor.shape) - self.dacmdp_core.penalty_beta * knn_dists_tensor
-        V = self.dacmdp_core.V[nn_indices_flat].view((nn, aa, tt)).to(self.device)
-        
-        V_prime = torch.sum(R + Tp*V, dim = 2).reshape(-1)
-        max_a_slot = torch.argmax(V_prime)
-        return cand_actions[max_a_slot]
+        return cand_actions[max_a_slot].type(torch.int).item()
+
 
     #  helper function    
     def save(self, save_folder = None):

@@ -12,7 +12,8 @@ def evaluate_on_env(env, policy_func, eps_count=30, verbose=False, render = Fals
                     action_repeat=1, eval_eps = 0,
                     render_mode = "human", 
                     render_width = None, 
-                    render_height = None):
+                    render_height = None, 
+                    gym_api = False):
     """
     takes input environment and a policy and returns average rewards
     latent policy flag = True if the policy is a discrete policy
@@ -37,7 +38,10 @@ def evaluate_on_env(env, policy_func, eps_count=30, verbose=False, render = Fals
     for e in iter__:
         eps_rewards, eps_steps, eps_infos, eps_renders, eps_houts = [], [], [], [], []
         sum_rewards, sum_steps, steps = 0,0,0
-        state_c = env.reset()
+        if gym_api:
+            state_c = env.reset()
+        else:
+            state_c, _ = env.reset()
 
         episode_hook_fxn(env = env, state = state_c)
         
@@ -60,7 +64,11 @@ def evaluate_on_env(env, policy_func, eps_count=30, verbose=False, render = Fals
                                             action_choice = policyAction)
                 ###################################################################
 
-                state_c, reward, done, info = env.step(np.array(policyAction))
+                if gym_api:
+                    state_c, reward, terminate, info = env.step(policyAction)
+                else:
+                    state_c, reward, terminate, truncate, info = env.step(np.array(policyAction))
+                    done = terminate or truncate
                 ##################################################################
                 hook_out_2 = after_step_hook_fxn(env = env, 
                                              next_state = state_c, 

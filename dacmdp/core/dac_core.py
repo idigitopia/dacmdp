@@ -126,7 +126,7 @@ class DACMDP_CORE():
     def __init__(self, n_tran_types, n_tran_targets, sa_repr_dim, penalty_beta = 1, device='cuda', penalty_type = "linear",
                     batch_calc_knn_ret_flat_engine = THelper.batch_calc_knn_ret_flat_pykeops):
         # ToDo Some sanity checkes for transitions
-
+        print("HURRAY , New Model loaded 105")
         super().__init__()
 
         self.batch_calc_knn_ret_flat_engine = batch_calc_knn_ret_flat_engine 
@@ -280,15 +280,8 @@ class DACMDP_CORE():
         self.Ti[state_indices] = knn_idx_tensor
         self.Tdist[state_indices] = knn_values_tensor
         self.R[state_indices] = self.D_rewards[knn_idx_tensor.view(-1)].reshape(knn_idx_tensor.shape)
-        if self.dac_constants.penalty_type == "linear":
-            # self.P[state_indices] = self.penalty_beta * torch.exp(self.Tdist[state_indices])
-            self.P[state_indices] = self.dac_constants.penalty_beta * self.Tdist[state_indices]
-            self.Tp[state_indices] = torch.nn.Softmax(dim = 2)(1/(knn_values_tensor+0.0001))
-        elif self.dac_constants.penalty_type == "exponential":
-            self.P[state_indices] = self.dac_constants.penalty_beta * self.Tdist[state_indices]
-            self.Tp[state_indices] = torch.nn.Softmax(dim = 2)(torch.log(1/(knn_values_tensor+0.0001)))
-        else: 
-            assert False, f"logic for penalty type {self.dac_constants.penalty_type} not defined"
+        self.P[state_indices] = 0 # placeholder for penalty
+        self.Tp[state_indices] = 0 # placeholder for Transition Probabilitie
         
         # Reset for terminal transitions , no need to update
         self.Ti[self.D_terminal_indices] = 0
@@ -308,11 +301,16 @@ class DACMDP_CORE():
         self.curr_error, self.Q, self.Pi, self.V, self.C = DACMDP_CORE.dac_safe_bellman_backup_operator(self.Ti, self.Tp, self.R, self.P, self.Q, self.V, self.C, self.gamma)
 
     def solve(self, max_n_backups=500, gamma=0.99, epsilon=0.001, penalty_beta = 1, operator = "simple_backup", reset_values = False, verbose=False, bellman_backup_batch_size=250) -> None:
+        
+
+        
         if reset_values:
             self.reset_value_vectors()
-        if self.dac_constants.penalty_beta != penalty_beta:
-            self.reset_value_vectors()
-            self.update_penalty_beta(penalty_beta)
+       
+        self.dac_constants.penalty_beta = penalty_beta
+        print("Replacing Penalty Beta with ", penalty_beta)
+        self.update_penalties()
+
 
         operator_map = {"simple_backup":self.single_bellman_backup_computation, 
                         "dac_backup":self.single_dac_bellman_backup_computation,
@@ -339,16 +337,16 @@ class DACMDP_CORE():
         self.V = torch.zeros((nn,)).type(torch.float32).to(device=self.device)
         self.C = torch.zeros((nn,)).type(torch.float32).to(device=self.device) # Cost of optimal policy for each state.
         self.Pi = torch.zeros((nn)).type(torch.LongTensor).to(device=self.device)
-
-    def update_penalty_beta(self,penalty_beta):
-        self.penalty_beta = penalty_beta
-        self.P = penalty_beta * self.Tdist
     
-    def update_dist_normalization(self,exp_dist = False):
-        if exp_dist:
-            self.P = torch.nn.Softmax(dim = 2)(1/(self.Tdist+0.0001))
+    def update_penalties(self):
+        print("Updating Penalties")
+        self.P = self.dac_constants.penalty_beta * self.Tdist
+        if self.dac_constants.penalty_type == "exp":
+            self.Tp = torch.nn.Softmax(dim = 2)(1/(self.P+0.0001))
+        elif self.dac_constants.penalty_type == "linear":
+            self.Tp = torch.nn.Softmax(dim = 2)(torch.log(1/(self.P+0.0001)))
         else:
-            self.P = torch.nn.Softmax(dim = 2)(torch.log(1/(self.Tdist+0.0001)))
+            raise ValueError("Invalid Penalty Type")
 
     def calc_dynamics_prob_using_true_softmax(self):
         self.Tp = torch.nn.Softmax(dim=2)(1/(self.Tdist+0.0001)).to(self.device)
