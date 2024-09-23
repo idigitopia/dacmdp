@@ -126,7 +126,6 @@ class DACMDP_CORE():
     def __init__(self, n_tran_types, n_tran_targets, sa_repr_dim, penalty_beta = 1, device='cuda', penalty_type = "linear",
                     batch_calc_knn_ret_flat_engine = THelper.batch_calc_knn_ret_flat_pykeops):
         # ToDo Some sanity checkes for transitions
-        print("HURRAY , New Model loaded 105")
         super().__init__()
 
         self.batch_calc_knn_ret_flat_engine = batch_calc_knn_ret_flat_engine 
@@ -302,8 +301,6 @@ class DACMDP_CORE():
 
     def solve(self, max_n_backups=500, gamma=0.99, epsilon=0.001, penalty_beta = 1, operator = "simple_backup", reset_values = False, verbose=False, bellman_backup_batch_size=250) -> None:
         
-
-        
         if reset_values:
             self.reset_value_vectors()
        
@@ -347,6 +344,12 @@ class DACMDP_CORE():
             self.Tp = torch.nn.Softmax(dim = 2)(torch.log(1/(self.P+0.0001)))
         else:
             raise ValueError("Invalid Penalty Type")
+    
+        # Reset for terminal transitions , no need to update
+        self.Ti[self.D_terminal_indices] = 0
+        self.Tp[self.D_terminal_indices] = 0
+        self.R[self.D_terminal_indices] = 0
+        self.P[self.D_terminal_indices] = 0
 
     def calc_dynamics_prob_using_true_softmax(self):
         self.Tp = torch.nn.Softmax(dim=2)(1/(self.Tdist+0.0001)).to(self.device)

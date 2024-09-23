@@ -13,9 +13,9 @@ import torch
 from tqdm import tqdm
 import numpy as np
 from munch import Munch
+from PIL import Image
 
 # Project Specific Dependencies
-
 def tensor_set_minus(t1:torch.Tensor, t2:torch.Tensor)->torch.Tensor:
     # Create a tensor to compare all values at once
     compareview = t2.repeat(t1.shape[0],1).T
@@ -199,7 +199,25 @@ def matrix_hash(m):
         return tuple(m)
 
 
-def plot_distributions_as_rgb_array(dists:dict, n_bins = 100)->np.ndarray:
+def rgb_array_to_jpeg(rgb_array, path='output.jpg'):
+    width, height =  rgb_array.shape[1], rgb_array.shape[0]
+
+    # Ensure the array is the correct shape
+    if rgb_array.shape != (height, width, 3):
+        raise ValueError("RFB array shape does not match the specified dimensions")
+
+    # Convert the array to uint8 if it's not already
+    if rgb_array.dtype != np.uint8:
+        rgb_array = (rgb_array * 255).astype(np.uint8)
+
+    # Create an image from the array
+    image = Image.fromarray(rgb_array, 'RGB')
+
+    # Save the image as JPEG
+    image.save(path, 'JPEG')
+    print(f"Image saved as {path}")
+
+def plot_distributions_as_rgb_array(dists:dict, n_bins = 100, save_file_name = None)->np.ndarray:
     import matplotlib.pyplot as plt
     import math 
 
@@ -223,15 +241,18 @@ def plot_distributions_as_rgb_array(dists:dict, n_bins = 100)->np.ndarray:
     except:
         pass
 
-    plt.show()
+    # plt.show()
     fig.canvas.draw()
     # Now we can save it to a numpy array.
     data = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
     rgb_array = data.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+    
+    if save_file_name is not None:
+        rgb_array_to_jpeg(rgb_array, save_file_name)
 
     return rgb_array
 
-def plot_distribution_as_rgb_array(dist:np.ndarray)->np.ndarray:
+def plot_distribution_as_rgb_array(dist:np.ndarray, save_file_name = None)->np.ndarray:
     import matplotlib.pyplot as plt
 
     fig, axs = plt.subplots(figsize = (10,4),  dpi=200)
@@ -241,6 +262,9 @@ def plot_distribution_as_rgb_array(dist:np.ndarray)->np.ndarray:
     # Now we can save it to a numpy array.
     data = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
     rgb_array = data.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+
+    if save_file_name is not None:
+        rgb_array_to_jpeg(rgb_array, save_file_name)
 
     return rgb_array
 

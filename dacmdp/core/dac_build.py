@@ -22,8 +22,6 @@ class DACBuildWithActionNames:
                 effective_batch_size = 1000, 
                 batch_calc_knn_ret_flat_engine =  THelper.batch_calc_knn_ret_flat_jit):
  
-        print("HURRAY , New Model loaded 104")
-
         self.effective_batch_size = effective_batch_size
         
         ##################  Initial Setup. #############################################################
