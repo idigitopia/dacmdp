@@ -20,9 +20,11 @@ class DACBuildWithActionNames:
     def __init__(self, config, action_space, 
                 action_model, repr_model,
                 effective_batch_size = 1000, 
-                batch_calc_knn_ret_flat_engine =  THelper.batch_calc_knn_ret_flat_jit):
+                batch_knn_engine =  THelper.batch_calc_knn_jit):
  
         self.effective_batch_size = effective_batch_size
+        self.batch_knn_engine = batch_knn_engine
+        self.batch_knn_idxs_engine = lambda b, D, k : self.batch_knn_engine(b, D, k)[0]
         
         ##################  Initial Setup. #############################################################
         self.device = config.mdpSolveArgs.device
@@ -45,9 +47,10 @@ class DACBuildWithActionNames:
         self.dacmdp_core = DACMDP(n_tran_types=config.mdpBuildArgs.n_tran_types,
                             n_tran_targets=config.mdpBuildArgs.n_tran_targets,
                             sa_repr_dim=config.reprModelArgs.repr_dim,
-                            device=config.mdpSolveArgs.device, 
+                            penalty_beta = config.mdpBuildArgs.penalty_beta,
+                            device=config.mdpSolveArgs.device,
                             penalty_type = config.mdpBuildArgs.penalty_type, 
-                            batch_calc_knn_ret_flat_engine = batch_calc_knn_ret_flat_engine)
+                            batch_knn_engine = self.batch_knn_engine)
         ################################################################################################
         print("dacmdp_core_defined")
 
@@ -135,8 +138,6 @@ class DACBuildWithActionNames:
         #######################################################################################################################################
         
         
-        
-        
     def calculate_n_set_dataset_representations(self, state_indices):
         batch_size = len(state_indices)
         q_states, q_actions = self.all_states[state_indices], self.all_actions[state_indices]
@@ -154,56 +155,53 @@ class DACBuildWithActionNames:
         tran_repr_sets = sa_reprs.view((batch_size,self.n_tran_types,self.sa_repr_dim))
         self.dacmdp_core.set_transition_reprsentations(tran_repr_sets, state_indices)
 
-
-    # policy liftup functions
+    def to_tensor(self, x):
+        if not isinstance(x, torch.Tensor):
+            x = torch.tensor(x).cuda()
+        return x
+    # policy liftup functions_nam
     def dummy_lifted_policy(self, s):
-        nn_s_idx =  THelper.calc_knn_indices_jit(torch.FloatTensor(s).to(self.device), self.dacmdp_core.S, 1)[0]
+        nn_s_idx = self.batch_knn_idxs_engine(self.to_tensor(s).unsqueeze(0), self.dacmdp_core.S, 1)[0][0]
         policy_idx = self.dacmdp_core.Pi[nn_s_idx]
-        action = self.A_names[nn_s_idx,policy_idx]
+        action = self.A_names[nn_s_idx.cpu(),policy_idx.cpu()]
         return int(action.cpu().item()) if isinstance(self.action_space, gym.spaces.Discrete) else action
-
 
     def dac_nn_policy(self, s, policy_k = 5):
         # Encode the state.
-    
+        s = self.to_tensornp.sum(seed_buffer.all_rewards)(s)
         cand_actions = self.action_model.cand_actions_for_state(s)
-    
-        nn_s_idx =  THelper.calc_knn_indices_jit(torch.FloatTensor(s).to(self.device), self.dacmdp_core.S, policy_k)
-        nn_mean_Q_vals = torch.mean(self.dacmdp_core.Q[nn_s_idx], dim = 0)
-    
+        knn_s_idxs =  self.batch_knn_idxs_engine(s.unsqueeze(0).to(self.device), self.dacmdp_core.S, policy_k)[0]
+        nn_mean_Q_vals = torch.mean(self.dacmdp_core.Q[knn_s_idxs], dim = 0)
         max_a_slot = torch.argmax(nn_mean_Q_vals)
-        dummy_policy_action = cand_actions[max_a_slot].type(torch.int).item()
-    
-        return dummy_policy_action
-    
+        action = cand_actions[max_a_slot]
+        return int(action.cpu().item()) if isinstance(self.action_space, gym.spaces.Discrete) else action
 
     def dac_lifted_policy(self,s):
-                
+        s = self.to_tensor(s)
         aa, tt = self.n_tran_types, self.dacmdp_core.dac_constants.n_tran_targets # number of Actions, number of targets for each action prediction.
         cand_actions = self.action_model.cand_actions_for_state(s) # is equal to the number of actions / transition types
-        sa_reprs = self.repr_model.encode_state_action_pairs(torch.FloatTensor(s).repeat(self.n_tran_types).view(-1,len(s)),
-                                                            cand_actions).to(self.device) # SA Representations
-        nn_indices_flat, nn_values_flat = THelper.batch_calc_knn_ret_flat(sa_reprs, self.dacmdp_core.D_repr, k=tt)
-        knn_idx_tensor = nn_indices_flat.view((aa, tt)).to(self.device)
-        knn_dists_tensor = nn_values_flat.view((aa, tt)).to(self.device)
+
+        sa_reprs = self.repr_model.encode_state_action_pairs(s.repeat(self.n_tran_types).view(-1,len(s)).cpu(), cand_actions.cpu()).to(self.device) # SA Representations
+        knn_idx_tensor, knn_dists_tensor = self.batch_knn_engine(sa_reprs, self.dacmdp_core.D_repr, k=tt)
         
         Tp = torch.nn.Softmax(dim = 1)(torch.log(1/(knn_dists_tensor+0.0001)))
 
         # Penalty 
         P = self.dacmdp_core.dac_constants.penalty_beta * knn_dists_tensor
         R_data = self.dacmdp_core.D_rewards[knn_idx_tensor.view(-1)].reshape(knn_idx_tensor.shape)
+
         R = R_data - P
-        V = self.dacmdp_core.V[nn_indices_flat].view((aa, tt)).to(self.device)
-        C = self.dacmdp_core.C[nn_indices_flat].view((aa, tt)).to(self.device)
+        V = self.dacmdp_core.V[knn_idx_tensor.view(-1)].view((aa, tt)).to(self.device)
+        C = self.dacmdp_core.C[knn_idx_tensor.view(-1)].view((aa, tt)).to(self.device)
 
         # import pdb; pdb.set_trace()
         # print(R.shape)
-        Q_vals = torch.sum( Tp*(R+V), dim = 1).reshape(-1)
+        Q_vals = torch.sum(Tp*(R+V), dim = 1).reshape(-1)
         C_vals = torch.sum(Tp*(P+C), dim = 1).reshape(-1)
         max_a_slot = torch.argmax(Q_vals)
-        
-        return cand_actions[max_a_slot].type(torch.int).item()
+        action = cand_actions[max_a_slot]
 
+        return int(action.cpu().item())  if isinstance(self.action_space, gym.spaces.Discrete) else action
 
     #  helper function    
     def save(self, save_folder = None):

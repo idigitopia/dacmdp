@@ -249,11 +249,11 @@ class StandardBuffer(object):
         for _ in range(episode_count):
             eps_count += 1
             episode_timesteps = 0
-            done = False
-            state = env.reset()
+            terminated, truncated = False, False
+            state , info = env.reset()
             ep_reward = 0
             episode_start = True
-            while not done:
+            while not terminated or truncated:
                 episode_timesteps += 1
                 if render:
                     env.render()
@@ -261,14 +261,11 @@ class StandardBuffer(object):
                 action =policy(state)
 
                 # Perform action and log results
-                next_state, reward, done, info = env.step(action)
+                next_state, reward, terminated, truncated, info = env.step(action)
                 ep_reward += reward
 
-                # Only consider "done" if episode terminates due to failure condition
-                done_float = float(done) if episode_timesteps < env._max_episode_steps else 0
-
                 # Store data in replay buffer
-                buffer.add(state, action, next_state, reward, done_float, done, episode_start)
+                buffer.add(state, action, next_state, reward, float(terminated),terminated,  episode_start)
                 state = copy.copy(next_state)
                 episode_start = False
 

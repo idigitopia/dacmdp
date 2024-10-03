@@ -87,31 +87,29 @@ class ContinuousCartPoleNoisyEnv(gym.Env):
         force = self.force_mag * float(action)
         state = self.stepPhysics(force)
         x, x_dot, theta, theta_dot = state
-        done = x < -self.x_threshold \
+        terminated = x < -self.x_threshold \
             or x > self.x_threshold \
             or theta < -self.theta_threshold_radians \
             or theta > self.theta_threshold_radians
-        done = bool(done) or self.step_count >= 500
-
-        if not done:
-            reward = 1.0
-        elif self.steps_beyond_done is None:
+        truncated = self.step_count >= 500
+        
+        reward = 0.0 if terminated else 1
+        if self.steps_beyond_done is None:
             # Pole just fell!
             self.steps_beyond_done = 0
-            reward = 1.0
-        else:
-            if self.steps_beyond_done == 0:
-                logger.warn("""
-You are calling 'step()' even though this environment has already returned
-done = True. You should always call 'reset()' once you receive 'done = True'
-Any further steps are undefined behavior.
-                """)
+
+        if self.steps_beyond_done == 0:
+            logger.warn("""
+            You are calling 'step()' even though this environment has already returned
+            done = True. You should always call 'reset()' once you receive 'done = True'
+            Any further steps are undnp.float32(low), np.float32(high)efined behavior.
+                            """)
             self.steps_beyond_done += 1
             reward = 0.0
 
         rand_noise = np.random.rand(4)
         self.state = np.array([*state,*rand_noise])
-        return self.state, reward, done, {}
+        return self.state, reward, terminated, truncated, {}
 
     def reset(self):
         state = self.np_random.uniform(low=-0.05, high=0.05, size=(4,))

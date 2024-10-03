@@ -133,7 +133,7 @@ class DiscreteActionModel(BaseActionModel):
 
 class NNActionModel(BaseActionModel):
 
-    def __init__(self, action_space, n_actions, data_buffer, nn_engine = "kd_tree", projection_fxn = None):
+    def __init__(self, action_space, n_actions, data_buffer, batch_knn_engine = THelper.batch_calc_knn_jit, projection_fxn = None):
 
         # will only work for feature representation of states, not images.
         # one can also do a random projection step here if images are passed.
@@ -142,6 +142,7 @@ class NNActionModel(BaseActionModel):
         # make a list of all seen states .
         
         # make a list of all seen states .
+        self.batch_knn_engine = batch_knn_engine
         self.projection_fxn = projection_fxn or (lambda s:s)
         self.latent_S = utils.v_map(fxn=projection_fxn,
                                      iterable=torch.FloatTensor(data_buffer.all_states),
@@ -152,25 +153,16 @@ class NNActionModel(BaseActionModel):
         self.n_actions = n_actions
 
         # create a kd tree.
-        if nn_engine == "kd_tree":
-            self.s_kDTree = RawKDTree(self.latent_S.cpu().numpy())
-            self.batch_query_knn_s_idxs = lambda s_batch, k: self.s_kDTree.query(s_batch, k=k)[1]
-        elif nn_engine == "torch_jit":
-            self.batch_query_knn_s_idxs = lambda s_batch, k: THelper.batch_calc_knn_jit(s_batch.cuda(), self.latent_S, k=k)[0].cpu()
-        elif nn_engine == "torch_pykeops":
-            self.batch_query_knn_s_idxs = lambda s_batch, k: THelper.batch_calc_knn_pykeops(s_batch.cuda(), self.latent_S, k=k)[0].cpu()
-        else:
-            print(f"nn_engine {nn_engine} not defined. Switching to default. torch_jit")
-            self.batch_query_knn_s_idxs = lambda s_batch, k: THelper.batch_calc_knn_jit(s_batch.cuda(), self.latent_S, k=k)[0].cpu()
+        self.batch_knn_idxs_engine = lambda s_batch, k : self.batch_knn_engine(s_batch.to("cuda"), self.latent_S, k=k)[0].cpu()
 
     def cand_actions_for_state(self, state: torch.Tensor) -> torch.Tensor:
         # query for nearest neighbors.
-        knn_idxs = self.batch_query_knn_s_idxs(self.projection_fxn(state.unsqueeze(0)).to("cuda"), k=self.n_actions)[0]
+        knn_idxs = self.batch_knn_idxs_engine(self.projection_fxn(state.unsqueeze(0)).to("cuda"), k=self.n_actions)[0]
         return self.action_store[knn_idxs.cpu()]
 
     def cand_actions_for_states(self, states: torch.Tensor) -> torch.Tensor:
         # query for nearest neighbors.
-        knn_idxs_batch = self.batch_query_knn_s_idxs(self.projection_fxn(states).to("cuda"), k=self.n_actions)
+        knn_idxs_batch = self.batch_knn_idxs_engine(self.projection_fxn(states).to("cuda"), k=self.n_actions)
         return self.action_store[knn_idxs_batch.cpu()]
 
     def __repr__(self):
@@ -226,10 +218,8 @@ class EnsembleActionModel(BaseActionModel):
     # def join_cand_actions_for_state(self, ensemble_of_actions):
     #     return [a for actions in ensemble_of_actions for a in actions]
 
-    def cand_actions_for_state(self, state):
-        assert False, "Not Implemented Error"
-        # ensemble_of_actions = [m.cand_actions_for_state(state) for m in self.ensemble_action_models]
-        # return self.join_cand_actions_for_state(ensemble_of_actions)
+    def cand_actions_for_state(self, state: torch.Tensor) -> torch.Tensor:
+        return self.cand_actions_for_states(state.unsqueeze(0))[0]
 
     def cand_actions_for_states(self, states):
         return torch.cat([m.cand_actions_for_states(states) for m in self.ensemble_action_models], dim = 1)

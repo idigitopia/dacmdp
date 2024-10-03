@@ -67,14 +67,12 @@ class DeltaPredictonRepr(object):
         object ([type]): [description]
     """
 
-    def __init__(self, s_multiplyer, a_multiplyer, buffer, nn_engine = "torch_jit"):
+    def __init__(self, s_multiplyer, a_multiplyer, buffer, batch_knn_engine = THelper.batch_calc_knn_jit):
         self.s_multiplyer = s_multiplyer
         self.a_multiplyer = a_multiplyer
         self.concat_repr_model = WeightedConcatRepr(s_multiplyer, a_multiplyer)
 
         self.state_store = torch.FloatTensor(buffer.all_states)
-        # ep_end_tran_idxs = torch.nonzero(torch.tensor(buffer.all_ep_ends).reshape(-1)).reshape(-1)
-        # self.state_store[ep_end_tran_idxs] = 9999*self.state_store[ep_end_tran_idxs] # Discount these from nn computation
         self.action_store = torch.FloatTensor(buffer.all_actions)
         self.next_state_store = torch.tensor(buffer.all_next_states)
 
@@ -82,21 +80,9 @@ class DeltaPredictonRepr(object):
             s, a) for s, a in zip(self.state_store, self.action_store)])
         
 
-        # create a kd tree.
-        if nn_engine == "kd_tree":
-            self.s_kDTree = RawKDTree(self.sa_repr_store)
-            self.batch_query_knn_s_idxs = lambda s_batch, k: self.s_kDTree.query(s_batch, k=k)[1]
-        elif nn_engine == "torch_jit":
-            self.latent_S = self.sa_repr_store.cuda()
-            self.batch_query_knn_s_idxs = lambda s_batch, k: THelper.batch_calc_knn_jit(s_batch.cuda(), self.latent_S, k=k)[0].cpu()
-        elif nn_engine == "torch_pykeops":
-            self.latent_S = self.sa_repr_store.cuda()
-            self.batch_query_knn_s_idxs = lambda s_batch, k: THelper.batch_calc_knn_pykeops(s_batch.cuda(), self.latent_S, k=k)[0].cpu()
-        else:
-            print(f"nn_engine {nn_engine} not defined. Switching to default. torch_jit")
-            self.latent_S = self.sa_repr_store.cuda()
-            self.batch_query_knn_s_idxs = lambda s_batch, k: THelper.batch_calc_knn_jit(s_batch.cuda(), self.latent_S, k=k)[0].cpu()
-
+        self.batch_knn_engine = batch_knn_engine
+        self.latent_S = self.sa_repr_store.cuda()
+        self.batch_query_knn_s_idxs = lambda s_batch, k : self.batch_knn_engine(s_batch.to("cuda"), self.latent_S, k=k)[0].cpu()
 
     def encode_state_action_pair(self, state: torch.Tensor, action: torch.Tensor) -> torch.tensor:
 
@@ -164,37 +150,37 @@ class OracleDynamicsRepr(object):
     @wrap_predict
     def predict_for_cartpole_cont(self, s, a):
         self.eval_env.unwrapped.state = s
-        ns, r, d, info = self.eval_env.step(np.array(a))
+        ns, r, tm,tc, info = self.eval_env.step(np.array(a))
         return ns
 
     @wrap_predict
     def predict_for_maze2d(self, s, a):
         self.eval_env.unwrapped.set_state(s[:2], s[2:])
-        ns, r, d, info = self.eval_env.step(np.array(a))
+        ns, r, tm,tc, info = self.eval_env.step(np.array(a))
         return ns
 
     @wrap_predict
     def predict_for_halfcheetah(self, s, a):
         self.eval_env.unwrapped.set_state(np.array([0] + s[:8].tolist()), s[8:])
-        ns, r, d, info = self.eval_env.step(np.array(a))
+        ns, r, tm,tc, info = self.eval_env.step(np.array(a))
         return ns
 
     @wrap_predict
     def predict_for_antmaze(self, s, a):
         self.eval_env.unwrapped.set_state(s[:15], s[15:])
-        ns, r, d, info = self.eval_env.step(np.array(a))
+        ns, r, tm,tc, info = self.eval_env.step(np.array(a))
         return ns
 
     @wrap_predict
     def predict_for_walker2d(self, s, a):
         self.eval_env.unwrapped.set_state(np.array([0] + s[:8].tolist()), s[8:])
-        ns, r, d, info = self.eval_env.step(np.array(a))
+        ns, r, tm,tc, info = self.eval_env.step(np.array(a))
         return ns
 
     @wrap_predict
     def predict_for_hopper(self, s, a):
         self.eval_env.unwrapped.set_state(np.array([0] + s[:5].tolist()), s[5:])
-        ns, r, d, info = self.eval_env.step(np.array(a))
+        ns, r, tm,tc, info = self.eval_env.step(np.array(a))
         return ns
 
     def encode_state_action_pair(self, state: torch.Tensor, action: torch.Tensor) -> torch.tensor:

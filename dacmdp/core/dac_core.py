@@ -123,12 +123,25 @@ class DACMDP_CORE():
     # Update D_rewards
     # Update all Ti Tp vectors. 
 
-    def __init__(self, n_tran_types, n_tran_targets, sa_repr_dim, penalty_beta = 1, device='cuda', penalty_type = "linear",
-                    batch_calc_knn_ret_flat_engine = THelper.batch_calc_knn_ret_flat_pykeops):
+    def __init__(self, n_tran_types, n_tran_targets, sa_repr_dim, penalty_beta , device, penalty_type, batch_knn_engine ):
+        """
+        Args:
+            n_tran_types (int): _description_
+            n_tran_targets (int): _description_
+            sa_repr_dim (int): _description_
+            penalty_beta (float): _description_
+            device (str): _description_
+            penalty_type (str): _description_
+            batch_calc_knn_engine (Tensor in cuda): returns batch_knn_idxs and batch_knn_dists
+                            input shape : (batch_size, repr_dim)
+                            output shape : (batch_size, k), (batch_size, k) | first output is indices, second is distances
+        """
         # ToDo Some sanity checkes for transitions
         super().__init__()
 
-        self.batch_calc_knn_ret_flat_engine = batch_calc_knn_ret_flat_engine 
+        self.batch_knn_engine = batch_knn_engine 
+        self.batch_knn_ret_flat_engine = lambda b,D,k : (i.view(-1) for i in self.batch_knn_engine(b,D,k))
+        
         self.device = device
 
         self.dac_constants = Munch()
@@ -269,7 +282,7 @@ class DACMDP_CORE():
         T_repr_slice = self.T_repr[state_indices]
         nn, aa, s_dim = T_repr_slice.shape
         all_sa_reprs = T_repr_slice.view((-1, self.dac_constants.sa_repr_dim)).cuda()
-        nn_indices_flat, nn_values_flat = self.batch_calc_knn_ret_flat_engine(all_sa_reprs, self.D_repr, k=self.dac_constants.n_tran_targets)
+        nn_indices_flat, nn_values_flat = self.batch_knn_ret_flat_engine(all_sa_reprs, self.D_repr, k=self.dac_constants.n_tran_targets)
         knn_idx_tensor = nn_indices_flat.view((nn, aa, self.dac_constants.n_tran_targets)).to(self.device)
         knn_values_tensor = nn_values_flat.view((nn, aa, self.dac_constants.n_tran_targets)).to(self.device)
 

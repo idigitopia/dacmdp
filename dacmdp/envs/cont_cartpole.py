@@ -57,7 +57,7 @@ class ContinuousCartPoleEnv(gym.Env):
         self.steps = 0
         self.step_count = 0
 
-        self.steps_beyond_done = None
+        self.steps_beyond_done = 0
         self._max_episode_steps = 500
 
     def seed(self, seed=None):
@@ -87,35 +87,35 @@ class ContinuousCartPoleEnv(gym.Env):
         force = self.force_mag * float(action)
         self.state = self.stepPhysics(force)
         x, x_dot, theta, theta_dot = self.state
-        done = x < -self.x_threshold \
+        
+        terminated = x < -self.x_threshold \
             or x > self.x_threshold \
             or theta < -self.theta_threshold_radians \
             or theta > self.theta_threshold_radians
-        done = bool(done) or self.step_count >= 500
+        truncated = self.step_count >= 500
+        
+        reward = 0.0 if terminated else 1
 
-        if not done:
-            reward = 1.0
-        elif self.steps_beyond_done is None:
-            # Pole just fell!
-            self.steps_beyond_done = 0
-            reward = 1.0
-        else:
-            if self.steps_beyond_done == 0:
-                logger.warn("""
-You are calling 'step()' even though this environment has already returned
-done = True. You should always call 'reset()' once you receive 'done = True'
-Any further steps are undnp.float32(low), np.float32(high)efined behavior.
-                """)
-            self.steps_beyond_done += 1
+        # Pole just fell!
+        self.steps_beyond_done += int(terminated or truncated)
+
+        if self.steps_beyond_done > 1:
+            logger.warn("""
+            You are calling 'step()' even though this environment has already returned
+            done = True. You should always call 'reset()' once you receive 'done = True'
+            Any further steps are undnp.float32(low), np.float32(high)efined behavior.
+                            """)
             reward = 0.0
 
-        return np.array(self.state).astype(np.float32), reward, done, {}
 
-    def reset(self):
+
+        return np.array(self.state).astype(np.float32), reward, terminated, truncated, {}
+
+    def reset(self, seed = None, options = None):
         self.state = self.np_random.uniform(low=-0.05, high=0.05, size=(4,)).astype(np.float32)
-        self.steps_beyond_done = None
+        self.steps_beyond_done = 0
         self.step_count = 0
-        return np.array(self.state)
+        return np.array(self.state), {}
 
     def render(self, mode='human'):
         screen_width = 600
