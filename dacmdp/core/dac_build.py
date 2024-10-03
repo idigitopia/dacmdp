@@ -168,7 +168,7 @@ class DACBuildWithActionNames:
 
     def dac_nn_policy(self, s, policy_k = 5):
         # Encode the state.
-        s = self.to_tensornp.sum(seed_buffer.all_rewards)(s)
+        s = self.to_tensor(s)
         cand_actions = self.action_model.cand_actions_for_state(s)
         knn_s_idxs =  self.batch_knn_idxs_engine(s.unsqueeze(0).to(self.device), self.dacmdp_core.S, policy_k)[0]
         nn_mean_Q_vals = torch.mean(self.dacmdp_core.Q[knn_s_idxs], dim = 0)
@@ -182,6 +182,7 @@ class DACBuildWithActionNames:
         cand_actions = self.action_model.cand_actions_for_state(s) # is equal to the number of actions / transition types
 
         sa_reprs = self.repr_model.encode_state_action_pairs(s.repeat(self.n_tran_types).view(-1,len(s)).cpu(), cand_actions.cpu()).to(self.device) # SA Representations
+        
         knn_idx_tensor, knn_dists_tensor = self.batch_knn_engine(sa_reprs, self.dacmdp_core.D_repr, k=tt)
         
         Tp = torch.nn.Softmax(dim = 1)(torch.log(1/(knn_dists_tensor+0.0001)))
