@@ -69,7 +69,6 @@ class THelper():
         knn = dist.topk(k, largest=False)
         return knn.indices
 
-
     @staticmethod
     def calc_knn(query: torch.Tensor, data: torch.Tensor, k:int):
         dist = torch.norm(data - query, dim=1, p=2)
@@ -77,28 +76,35 @@ class THelper():
         return knn
 
     @staticmethod
+    def batch_calc_knn(query_batch: torch.Tensor, data: torch.Tensor, k:int):
+        dists = torch.norm(query_batch.unsqueeze(1) - data.unsqueeze(0), dim=2, p=2)
+        nn_dists, nn_idx = torch.topk(dists, k, dim=-1, largest=False)
+        return nn_idx, nn_dists
+    
+    @staticmethod
     def batch_calc_knn_ret_flat(query_batch: torch.Tensor, data: torch.Tensor, k:int):
-        knn_batch = [THelper.calc_knn(q, data,k) for q in query_batch]
-        knn_indices_flat = torch.concat([knn.indices for knn in knn_batch])
-        knn_values_flat = torch.concat([knn.values for knn in knn_batch])
-        return knn_indices_flat, knn_values_flat
+        nn_idx, nn_dists = THelper.batch_calc_knn(query_batch, data, k)
+        return nn_idx.view(-1), nn_dists.view(-1)
 
-
+    @staticmethod
+    @torch.jit.script
+    def calc_knn_jit(query: torch.Tensor, data: torch.Tensor, k:int):
+        dist = torch.norm(data - query, dim=1, p=2)
+        knn = dist.topk(k, largest=False)
+        return knn
     
     @staticmethod
     @torch.jit.script
     def batch_calc_knn_jit(query_batch: torch.Tensor, data: torch.Tensor, k:int):
-        dists = torch.cdist(query_batch, data)
-        nn_dists, nn_idx = torch.topk(dists, k, dim=-1, largest = False)
+        dists = torch.norm(query_batch.unsqueeze(1) - data.unsqueeze(0), dim=2, p=2)
+        nn_dists, nn_idx = torch.topk(dists, k, dim=-1, largest=False)
         return nn_idx, nn_dists
     
     @staticmethod
     @torch.jit.script
     def batch_calc_knn_ret_flat_jit(query_batch: torch.Tensor, data: torch.Tensor, k:int):
-        dists = torch.cdist(query_batch, data)
-        nn_dists, nn_idx = torch.topk(dists, k, dim=-1, largest = False)
+        nn_idx, nn_dists = THelper.batch_calc_knn(query_batch, data, k)
         return nn_idx.view(-1), nn_dists.view(-1)
-
     
     @staticmethod
     def batch_calc_knn_pykeops(query: torch.Tensor, data: torch.Tensor, k:int):
