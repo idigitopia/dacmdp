@@ -83,7 +83,8 @@ class THelper():
     
     @staticmethod
     def batch_calc_knn_ret_flat(query_batch: torch.Tensor, data: torch.Tensor, k:int):
-        nn_idx, nn_dists = THelper.batch_calc_knn(query_batch, data, k)
+        dists = torch.norm(query_batch.unsqueeze(1) - data.unsqueeze(0), dim=2, p=2)
+        nn_dists, nn_idx = torch.topk(dists, k, dim=-1, largest=False)
         return nn_idx.view(-1), nn_dists.view(-1)
 
     @staticmethod
@@ -103,7 +104,8 @@ class THelper():
     @staticmethod
     @torch.jit.script
     def batch_calc_knn_ret_flat_jit(query_batch: torch.Tensor, data: torch.Tensor, k:int):
-        nn_idx, nn_dists = THelper.batch_calc_knn(query_batch, data, k)
+        dists = torch.norm(query_batch.unsqueeze(1) - data.unsqueeze(0), dim=2, p=2)
+        nn_dists, nn_idx = torch.topk(dists, k, dim=-1, largest=False)
         return nn_idx.view(-1), nn_dists.view(-1)
     
     @staticmethod

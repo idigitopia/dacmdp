@@ -185,7 +185,8 @@ class DACBuildWithActionNames:
         
         knn_idx_tensor, knn_dists_tensor = self.batch_knn_engine(sa_reprs, self.dacmdp_core.D_repr, k=tt)
         
-        Tp = torch.nn.Softmax(dim = 1)(torch.log(1/(knn_dists_tensor+0.0001)))
+        # Tp = torch.nn.Softmax(dim = 1)(torch.log(1/(knn_dists_tensor+0.0001)))
+        Tp = torch.nn.Softmax(dim = 1)(-(knn_dists_tensor+0.0001))
 
         # Penalty 
         P = self.dacmdp_core.dac_constants.penalty_beta * knn_dists_tensor
